@@ -1,0 +1,243 @@
+name: ReDate Pipeline
+
+on:
+  schedule:
+    # 1. Daily Ingest: 北京时间 16:30 => UTC 08:30
+    - cron: '30 8 * * *'
+    
+    # 2. Weekly Summary: 北京时间 周一 09:00 => UTC 01:00
+    - cron: '0 1 * * 1'
+    
+    # 3. Yearly Summary: 北京时间 1月1日 10:00 => UTC 02:00
+    - cron: '0 2 1 1 *'
+
+  workflow_dispatch:
+    inputs:
+      job_type:
+        description: 'Execution Mode (daily/weekly/yearly)'
+        required: true
+        default: 'daily'
+        type: choice
+        options: ['daily', 'weekly', 'yearly']
+      target_date:
+        description: 'Specific Date (YYYY-MM-DD, Optional for daily)'
+        required: false
+
+env:
+  IMAGE_NAME: redate
+  IMAGE_TAG: latest
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1: 代码质量与架构检查 (Quality Gate)
+  # --------------------------------------------------------------------------
+  quality-gate:
+    name: Code Quality & Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Pixi (Package Manager)
+        uses: prefix-dev/setup-pixi@v0.9.3 # Updated to v0.9.3
+        with:
+          pixi-version: v0.63.0
+          cache: true
+          environments: dev
+
+      - name: Lint & Type Check (ruff & mypy)
+        run: |
+          pixi run lint
+          pixi run typecheck
+          pixi run contract-check
+
+  # --------------------------------------------------------------------------
+  # Job 2: 构建、安全扫描与 SBOM (Secure Build)
+  # --------------------------------------------------------------------------
+  build-secure:
+    name: Build, Scan & SBOM
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Export Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true # 导出到 Docker Daemon 以便后续扫描
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --- Security: Vulnerability Scanning ---
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@v0.12.0 # Updated to stable tag
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          format: 'table'
+          exit-code: '1'       # 发现高危漏洞(Critical)则阻断构建
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # --- Security: SBOM Generation (Software Bill of Materials) ---
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@v0.12.0 # Updated to stable tag
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          format: 'cyclonedx'
+          output: 'sbom.json'
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.json
+          retention-days: 5
+
+      # --- Export Image for Runtime Job ---
+      - name: Save Docker Image
+        run: docker save ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} -o redate_image.tar
+
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: redate_image.tar
+          retention-days: 1
+
+  # --------------------------------------------------------------------------
+  # Job 3: 业务执行 (Runtime Execution)
+  # --------------------------------------------------------------------------
+  execute-pipeline:
+    name: Execute Logic (Sidecar Pattern)
+    needs: build-secure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 恢复镜像
+      - name: Download Docker Image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+      
+      - name: Load Docker Image
+        run: docker load -i /tmp/redate_image.tar
+
+      # 2. 配置网络隧道 (Gost Sidecar)
+      - name: Configure Network Tunnel
+        run: |
+          mkdir -p secrets/certs secrets/ssh config
+          # 注入证书与密钥
+          echo "${{ secrets.GOST_CA_CRT }}" > secrets/certs/ca.crt
+          echo "${{ secrets.GOST_CLIENT_CRT }}" > secrets/certs/client.crt
+          echo "${{ secrets.GOST_CLIENT_KEY }}" > secrets/certs/client.key
+          echo "${{ secrets.VPS_SSH_KEY }}" > secrets/ssh/id_rsa
+          chmod 600 secrets/ssh/id_rsa
+          
+          # 生成 Gost 配置
+          envsubst < config/gost-client.template.yaml > config/gost-client.yaml
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+
+      # 3. 启动 Gost Sidecar (Network Mesh)
+      # 所有的业务流量将通过 localhost:1080 (SOCKS5) 转发
+      - name: Start Gost Sidecar
+        run: |
+          docker network create redate-net
+          docker run -d --name gost-sidecar \
+            --network redate-net \
+            --restart always \
+            -v $(pwd)/config:/config \
+            -v $(pwd)/secrets:/secrets \
+            gogost/gost:3.2 \
+            -C /config/gost-client.yaml
+
+      # 4. 确定业务指令 (Schedule Mapping)
+      - name: Determine Command
+        id: strategy
+        run: |
+          # 默认模式
+          MODE="daily"
+          DATE_ARG=""
+
+          # Schedule 判定
+          if [[ "${{ github.event.schedule }}" == "30 8 * * *" ]]; then
+            MODE="daily"
+            echo "Detected Daily Schedule (16:30 CST)"
+          elif [[ "${{ github.event.schedule }}" == "0 1 * * 1" ]]; then
+            MODE="weekly"
+            echo "Detected Weekly Schedule (Mon 09:00 CST)"
+          elif [[ "${{ github.event.schedule }}" == "0 2 1 1 *" ]]; then
+            MODE="yearly"
+            echo "Detected Yearly Schedule (Jan 1 10:00 CST)"
+          fi
+
+          # Workflow Dispatch 覆盖
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            MODE="${{ github.event.inputs.job_type }}"
+            if [[ -n "${{ github.event.inputs.target_date }}" ]]; then
+              DATE_ARG="--target-date ${{ github.event.inputs.target_date }}"
+            fi
+          fi
+
+          echo "command=$MODE" >> $GITHUB_OUTPUT
+          echo "args=$DATE_ARG" >> $GITHUB_OUTPUT
+
+      # 5. 执行主容器 (Single Container Architecture)
+      # 共享 Gost Sidecar 的网络命名空间是不支持跨容器直接 localhost 的 (除非 Kubernetes Pod)
+      # 在 Docker 中，我们使用 --network container:gost-sidecar 模式来实现 Pod 级网络共享
+      # 或者使用自定义网络并指向服务名 (setup: WECHAT_PROXY_URL=socks5://gost-sidecar:1080)
+      - name: Run ReDate Core
+        env:
+          # 应用配置
+          VIKI_API_BASE: ${{ secrets.VIKI_API_BASE }}
+          
+          # R2 存储
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          
+          # AI 模型
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          
+          # 微信发布
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          # 关键: 在 redate-net 网络中，Gost 容器名为 gost-sidecar
+          WECHAT_PROXY_URL: "socks5://gost-sidecar:1080"
+          
+        run: |
+          docker run --rm \
+            --network redate-net \
+            --name redate-worker \
+            -e VIKI_API_BASE \
+            -e R2_ACCOUNT_ID -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY -e R2_ENDPOINT -e R2_BUCKET_NAME \
+            -e GEMINI_API_KEY \
+            -e WECHAT_APP_ID -e WECHAT_APP_SECRET -e WECHAT_PROXY_URL \
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            python -m src.main ${{ steps.strategy.outputs.command }} ${{ steps.strategy.outputs.args }}
+
+      # 6. 日志归档
+      - name: Collect Artifacts (Logs)
+        if: always()
+        run: |
+          docker logs redate-worker > run.log 2>&1 || true
+          docker logs gost-sidecar > proxy.log 2>&1 || true
+          
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-logs
+          path: "*.log"
+          retention-days: 30

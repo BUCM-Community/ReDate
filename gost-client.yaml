@@ -1,0 +1,51 @@
+services:
+  - name: local-proxy
+    addr: :1080
+    handler:
+      type: socks5
+      chain: fallback-chain # 使用定义好的回退链
+
+chains:
+  - name: fallback-chain
+    hops:
+      - name: vps-gateway
+        nodes:
+          # 第一优先级：QUIC (UDP 443 伪装)
+          - name: primary-quic
+            addr: ${VPS_HOST}:8443
+            connector:
+              type: socks5
+              metadata:
+                connectTimeout: 5s
+            dialer:
+              type: quic
+              tls:
+                certFile: /certs/client.crt
+                keyFile: /certs/client.key
+                caFile: /certs/ca.crt # 自签名 CA
+                serverName: redate.proxy
+
+          # 第二优先级：WSS (WebSocket + TLS, 穿透性强)
+          - name: secondary-wss
+            addr: ${VPS_HOST}:8444
+            connector:
+              type: socks5
+            dialer:
+              type: wss
+              path: /redate-tunnel # 自定义路径防探测
+              tls:
+                certFile: /certs/client.crt
+                keyFile: /certs/client.key
+                caFile: /certs/ca.crt
+                serverName: redate.proxy
+
+          # 第三优先级：SSH (加密隧道兜底)
+          - name: tertiary-ssh
+            addr: ${VPS_HOST}:8445
+            connector:
+              type: socks5
+            dialer:
+              type: ssh
+              auth:
+                type: key
+                keyFile: /ssh/id_rsa # 这里的私钥对应 VPS 上的 authorized_keys

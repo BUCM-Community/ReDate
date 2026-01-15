@@ -1,0 +1,40 @@
+name: ReDate Documentation Generation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'pyproject.toml'
+      - 'pixi.toml'
+      - 'src/**.py'  # 源码变动触发，因为 API 文档依赖源码 Docstrings
+      - '.github/workflows/autogen_docs.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Pixi (Package Manager)
+        uses: prefix-dev/setup-pixi@v0.9.3
+        with:
+          pixi-version: v0.63.0
+          cache: true
+          environments: docs
+
+      - name: Install Dependencies
+        run: pixi install -e docs
+      
+      - name: Build Docs
+        run: pixi run docs-build
+
+      - name: Build and Deploy Documentation
+        # mkdocs gh-deploy 会自动构建并推送到 gh-pages 分支
+        run: pixi run docs-deploy

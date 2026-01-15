@@ -1,0 +1,26 @@
+[importlinter]
+root_package = src
+
+# 契约：分层架构检查
+[importlinter:contract:1]
+name = Layered Architecture Enforcement
+type = layers
+layers =
+    interface      # 最上层：CLI 入口, API Handler
+    application    # 应用层：编排业务流程 (Use Cases)
+    domain         # 领域层：核心业务逻辑, 数据模型 (Pure Python)
+    infrastructure # 基础设施层：API Client, Database, R2, WeChat Adapters
+containers = src
+# 规则：
+# 1. Interface 可以导入 Application, Domain, Infrastructure (用于依赖注入)
+# 2. Application 可以导入 Domain, Infrastructure (作为接口)
+# 3. Domain 不能导入任何其他层 (核心逻辑独立)
+# 4. Infrastructure 只能导入 Domain (实现接口)
+# 注意：layers 配置意味着上面的层可以导入下面的层。
+# 这里我们需要根据实际依赖倒置原则调整，通常 Infrastructure 依赖 Domain。
+# 如果使用依赖倒置，配置如下：
+# layers = 
+#    interface
+#    infrastructure
+#    application
+#    domain
