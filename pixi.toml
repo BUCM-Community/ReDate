@@ -1,6 +1,6 @@
-[workspace] 
+[workspace]
 name = "redate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Production-grade News Aggregation & Publishing Platform"
 authors = ["BUCM-Community <bcnn@beginner.center>"]
 license = "MPL-2.0"
@@ -8,93 +8,142 @@ license-file = "LICENSE"
 readme = "README.md"
 repository = "https://github.com/BUCM-Community/ReDate"
 channels = ["conda-forge"]
-# 加入全平台支持，方便本地调试
-platforms = ["linux-64", "win-64", "osx-arm64", "osx-64", "win-arm64"]
-requires-pixi = ">=0.63.0"
+# 只包含主流架构，确保 CI 和本地开发无阻碍
+platforms = ["linux-64", "win-64", "osx-arm64"]
+requires-pixi = ">=0.63.1"
 
+# ==========================================
+# 任务编排 (Tasks)
+# ==========================================
 [tasks]
-# Application Lifecycle
-start = "python src/main.py"
-start-daily = "python src/main.py daily"
-start-weekly = "python src/main.py weekly"
-start-yearly = "python src/main.py yearly"
+# --- Meta Sync ---
+export-meta = { cmd = "python scripts/sync_meta.py", description = "Sync pyproject.toml metadata using tomlkit" }
 
-# Quality Assurance
-lint = { cmd = "ruff check src tests", description = "Run static analysis" }
-format = { cmd = "ruff format src tests", description = "Auto-format code" }
-typecheck = { cmd = "mypy src", description = "Run static type checking" }
+# --- Lifecycle ---
+start = "python -m redate.main"
+start-daily = "python -m redate.main daily"
+start-weekly = "python -m redate.main weekly"
+start-yearly = "python -m redate.main yearly"
+
+# --- QA & Security ---
+lint = { cmd = "ruff check redate tests scripts", description = "Run static analysis" }
+format = { cmd = "ruff format redate tests scripts", description = "Auto-format code" }
+typecheck = { cmd = "mypy redate", description = "Run strict static type checking" }
+contract-check = { cmd = "lint-imports", description = "Enforce architectural layers checks" }
+
+# --- Testing ---
 test = { cmd = "pytest tests", description = "Run unit tests" }
-coverage = { cmd = "pytest --cov=src --cov-report=xml:coverage.xml --cov-report=term", description = "Run tests with coverage" }
-contract-check = { cmd = "lint-imports", description = "Enforce architectural layers" }
+coverage = { cmd = "python -m pytest --cov=redate --cov-report=xml:coverage.xml --cov-report=term", description = "Run tests with coverage" }
 
-# Documentation
+# --- Utils ---
+clean = { cmd = "python -c \"import shutil, os; [shutil.rmtree(p, ignore_errors=True) for p in ['dist', 'site', '.pytest_cache', '.ruff_cache', '.mypy_cache', 'coverage.xml', '.coverage'] if os.path.exists(p)]\"", description = "Clean build artifacts" }
+
+# --- Documentation ---
 docs-serve = "mkdocs serve"
 docs-build = "mkdocs build"
-docs-deploy = { cmd = "mkdocs gh-deploy --force", description = "Build and deploy documentation to GitHub Pages" }
 
 # ==========================================
-# 核心依赖 (Conda-forge)
-# 包含解释器、二进制工具和重计算库
+# 全局Conda依赖 (Common Dependencies)
 # ==========================================
 [dependencies]
-python = "3.12.*"
-# conda分发会自动链接优化库
-numpy = ">=2.1.0" 
-# 显式加入 ca-certificates，防止 Windows/Mac 下企业内网 SSL 报错
+# 基础科学计算与工具库
+numpy = ">=2.4.0, <3"
+# 显式加入 ca-certificates，解决内网/Windows下的SSL证书信任问题
 ca-certificates = "*"
 
 # ==========================================
-# 业务依赖 (PyPI)
-# 纯 Python 库，或迭代极快的 AI/Web 库
+# 全局PyPI 依赖 (Business Logic)
 # ==========================================
 [pypi-dependencies]
-# Core Async & Web
+# --- 项目自身的 Editable 安装 ---
+# 在 site-packages 生成 .pth 指向项目根目录，让 'import redate' 生效，修改代码无需重装。
+redate = { path = ".", editable = true }
+
+# --- 业务库 ---
 aiohttp = ">=3.13.3"
 typer = ">=0.21.1"
 pydantic = ">=2.12.5, <3"
 pydantic-settings = ">=2.12.0, <3"
 tenacity = ">=9.1.2, <10"
 beautifulsoup4 = ">=4.14.3, <5"
-
-# Observability
 structlog = ">=25.5.0, <26"
 
-# Data & AI
-lancedb = ">=0.26.1, <0.27" 
-google-genai = ">=1.57.0, <2"
+# --- Data & AI ---
+lancedb = ">=0.26.1, <0.27"
+google-genai = ">=1.59.0, <2"
+openai = ">=2.15.0, <3"
 aioboto3 = ">=15.5.0, <16"
 types-aiobotocore-s3 = ">=3.1.0, <4"
 orjson = ">=3.10.3, <4"
 
 # ==========================================
-# 功能特性 (Features)
+# 特性 (Features) - 定义模块化的依赖集
 # ==========================================
-[feature.dev.dependencies]
-ruff = ">=0.14.0, <0.15"
+
+# --- Python 版本矩阵 ---
+# 目前三方库版本比较新，有些已不支持py310，本项目不去除GIL
+[feature.py311]
+dependencies = { python = "3.11.*" }
+[feature.py312]
+dependencies = { python = "3.12.*" }
+[feature.py313]
+dependencies = { python = "3.13.*" }
+[feature.py314]
+dependencies = { python = "3.14.*" }
+
+# --- 开发工具链 ---
+[feature.dev.pypi-dependencies]
+ruff = ">=0.14.13"
 mypy = ">=1.19.1"
-pytest = ">=9.0.2, <10"
-pytest-cov = ">=7.0.0, <8"
-pytest-asyncio = ">=0.23.6, <1"
+import-linter = ">=2.9"
+tomlkit = ">=0.14.0"
+
+# --- pytest 生态 & 远程服务测试 ---
+[feature.test.pypi-dependencies]
+pytest = ">=9.0.2"
+pytest-cov = ">=7.0.0"
+pytest-asyncio = ">=0.23.6"
 pytest-mock = ">=3.15.1"
-import-linter = ">=2.9, <3"
+moto = ">=5.1.20, <6"
+respx = ">=0.22.0, <0.23"
 
-[feature.docs.dependencies]
+# --- 文档工具链 ---
+[feature.docs.pypi-dependencies]
 mkdocs = ">=1.6.1"
-mkdocs-material = ">=9.7.1, <10"
-mkdocstrings = ">=1.0.0, <2"
-mkdocstrings-python = ">=2.0.1, <3"
+mkdocs-material = ">=9.7.1"
+mkdocstrings = ">=1.0.0"
+mkdocstrings-python = ">=2.0.1"
 
-[feature.build.dependencies]
-uv = ">=0.9.25"
+# --- 构建工具链 ---
+[feature.build.pypi-dependencies]
+build = "*"
+uv = ">=0.9.26"
 
+# ==========================================
+# 环境 (Environments) - 组合特性
+# ==========================================
 [environments]
-# 使用 solve-group 确保环境共享完全相同的核心依赖版本
-# no-default-feature = false 是默认值
-# 1. 开发环境：包含核心代码(默认) + 开发工具 + 文档工具
-default = { features = ["dev", "docs"], solve-group = "redate-lifecycle" }
+# 1. 默认开发环境 (Local Development)
+# 包含：Python 3.12 + 开发工具 + 测试工具 + 文档工具
+# 策略：solve-group 确保 dev 和 prod 的核心库版本严格一致
+default = { features = ["py312", "dev", "test", "docs"], solve-group = "main-env" }
 
-# 2. 生产环境：包含核心代码(默认) + 构建/部署工具
-prod = { features = ["build"], solve-group = "redate-lifecycle" }
+# 2. 生产部署环境 (Production)
+# 包含：Python 3.12 + 构建工具 (无测试/文档工具，体积更小)
+prod = { features = ["py312", "build"], solve-group = "main-env" }
 
-# 3. 纯净测试环境：仅包含核心 + 基础测试，用于 CI 流水线
-ci = { features = ["dev"], solve-group = "redate-lifecycle" }
+# 3. Documentation Deploy (Isolated)
+# No need for solve-group, optimized for speed/size
+docs = { features = ["py312", "docs"] }
+
+# 4. CI 兼容性矩阵 (CI Matrix Testing)
+# 策略：完全独立的环境，不使用 solve-group，确保各自解析最优依赖
+# 仅在 GitHub Actions 中并行调用
+test-311 = { features = ["py311", "test"] }
+test-312 = { features = ["py312", "test"] } # 专门用于纯净测试
+test-313 = { features = ["py313", "test"] }
+test-314 = { features = ["py314", "test"] }
+
+# ==========================================
+# 平台特定覆盖 (Platform Specific Overrides)
+# ==========================================

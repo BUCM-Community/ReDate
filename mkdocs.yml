@@ -1,35 +1,39 @@
 # ==========================================
-# Project Metadata (Adapted for ReDate News)
+# Project Metadata
 # ==========================================
-site_name: ReDate API Reference
-site_description: "development documentation for ReDate"
-site_url: https://BUCM-Community.github.io/ReDate/
+site_name: ReDate Documentation
+site_description: "Production-grade Documentation for ReDate Platform"
+site_url: https://docs.redate.io
 repo_url: https://github.com/BUCM-Community/ReDate
 repo_name: ReDate
-edit_uri: edit/dev/docs/
+edit_uri: edit/main/docs/
 
 # ==========================================
 # Theme Configuration
 # ==========================================
 theme:
   name: material
-  language: zh
+  language: en
   features:
     - content.code.copy
+    - content.code.annotate
     - navigation.expand
     - navigation.sections
-    - navigation.top 
+    - navigation.top
+    - navigation.indexes
     - toc.follow
-  palette: 
+  palette:
     # Light Mode
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: teal
       accent: purple
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     # Dark Mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: teal
       accent: lime
       toggle:
@@ -45,7 +49,6 @@ plugins:
       default_handler: python
       handlers:
         python:
-          # 指向 src 目录，这样文档中可以使用 "::: main" 或 "::: service_news"
           paths: [src]
           options:
             show_source: true
@@ -53,7 +56,10 @@ plugins:
             heading_level: 2
             docstring_style: google
             merge_init_into_class: true
+            show_category_heading: true
             show_submodules: false
+            # Show type annotations explicitly
+            show_signature_annotations: true
 
 # ==========================================
 # Markdown Extensions
@@ -76,22 +82,22 @@ markdown_extensions:
 # Navigation / Structure
 # ==========================================
 nav:
-  - 项目主页: index.md
-  - 架构设计: architecture.md
-  - API 参考:
-      - 核心入口 (CLI):
-          - Main: reference/main.md
-          - Configuration: reference/config.md
-      - 业务逻辑 (Service):
-          - Orchestrator: reference/service_news.md
-          - Domain Models: reference/domain_models.md
-          - Interfaces (Ports): reference/ports.md
-      - 基础设施 (Adapters):
-          - Viki News (Source): reference/adapter_viki.md
-          - Gemini (LLM): reference/adapter_gemini.md
-          - Image (Unsplash): reference/adapter_image.md
-          - WeChat (Publisher): reference/adapter_wechat.md
-          - Storage (R2/LanceDB): reference/adapter_storage.md
-      - 工具库 (Utils):
-          - Date Utils: reference/utils_date.md
-          - Telemetry Utils: reference/utils_telemetry.md
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture.md
+      - Domain Models: reference/domain_models.md
+      - Ports (Interfaces): reference/ports.md
+      - Cli (Entry): reference/main.md
+  - Core Logic:
+      - Orchestrator: reference/service_news.md
+      - Configuration: reference/config.md
+  - Infrastructure (Adapters):
+      - Viki News (Source): reference/adapter_viki.md
+      - Gemini (LLM): reference/adapter_gemini.md
+      - OpenAI (LLM): reference/adapter_openai.md
+      - Storage (R2/LanceDB): reference/adapter_storage.md
+      - WeChat (Publisher): reference/adapter_wechat.md
+      - Image Fetcher: reference/adapter_image.md
+  - Utilities:
+      - Date Utils: reference/utils_date.md
+      - Telemetry Utils: reference/utils_telemetry.md

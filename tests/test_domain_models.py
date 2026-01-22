@@ -1,48 +1,57 @@
+"""
+tests/test_domain_models.py
+Unit tests for Core Domain Logic.
+Focus: Immutability, Hashing, Result Monad behavior.
+"""
+
 from datetime import date
 from typing import cast
 
-from pydantic import HttpUrl
+import pytest
+from pydantic import HttpUrl, ValidationError
 
-from src.domain_models import DailyNewsBatch, Err, NewsItem, Ok
+from redate.domain_models import (
+    Err,
+    NewsItem,
+    NewsNotFoundError,
+    Ok,
+)
 
 
-def test_news_item_fingerprint():
-    item1 = NewsItem(
-        content="Test Content",
-        url=cast(HttpUrl, "https://example.com/1"),
+def test_news_item_immutability():
+    """Ensure NewsItems are frozen (immutable)."""
+    item = NewsItem(
+        title="Test",
+        content="Content",
         published_at=date(2026, 1, 1),
+        url=cast(HttpUrl, "https://example.com"),
+    )
+    with pytest.raises(ValidationError):
+        item.title = "Changed"  # type: ignore
+
+
+def test_news_item_fingerprint_deterministic():
+    """Ensure fingerprint is stable based on content and URL."""
+    item1 = NewsItem(
+        content="A", url=cast(HttpUrl, "https://a.com"), published_at=date.today()
     )
     item2 = NewsItem(
-        content="Test Content",
-        url=cast(HttpUrl, "https://example.com/1"),
-        published_at=date(2026, 1, 1),
+        content="A", url=cast(HttpUrl, "https://a.com"), published_at=date.today()
     )
     item3 = NewsItem(
-        content="Different Content",
-        url=cast(HttpUrl, "https://example.com/1"),
-        published_at=date(2026, 1, 1),
+        content="B", url=cast(HttpUrl, "https://a.com"), published_at=date.today()
     )
 
     assert item1.fingerprint == item2.fingerprint
     assert item1.fingerprint != item3.fingerprint
 
 
-def test_result_pattern():
-    ok_res = Ok("value")
-    err_res = Err("error")
+def test_result_monad_behavior():
+    """Test Ok/Err pattern matching helper methods."""
+    success = Ok(100)
+    failure = Err(NewsNotFoundError(message="oops"))
 
-    assert ok_res.is_ok()
-    assert not err_res.is_ok()
-    assert ok_res.value == "value"
-    assert err_res.error == "error"
-
-
-def test_daily_news_batch_immutability():
-    batch = DailyNewsBatch(
-        date_str=date(2026, 1, 1), source="test", items=[], raw_json_hash="abc"
-    )
-    import pytest
-
-    with pytest.raises(Exception):
-        # type: ignore
-        batch.source = "new"
+    assert success.is_ok() is True
+    assert failure.is_ok() is False
+    assert success.value == 100
+    assert isinstance(failure.error, NewsNotFoundError)

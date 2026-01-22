@@ -1,7 +1,7 @@
 """
-src/main.py
+redate/main.py
 CLI Entry point wiring dependencies.
-Focus: Composition Root, Type-safe CLI.
+Focus: Composition Root, Type-safe CLI, Dynamic Dependency Injection.
 """
 
 import asyncio
@@ -10,11 +10,14 @@ from typing import Annotated
 
 import typer
 
-from .adapter_gemini import GeminiAdapter
 from .adapter_image import HybridImageAdapter
 from .adapter_storage import HybridStorageAdapter
 from .adapter_viki import VikiNewsAdapter
 from .adapter_wechat import WeChatAdapter
+from .config import settings
+
+# Lazy import to avoid loading unused SDKs
+from .ports import LLMEngine
 from .service_news import NewsService
 from .utils_date import get_beijing_today
 from .utils_telemetry import logger
@@ -24,12 +27,36 @@ __all__ = ["app"]
 app = typer.Typer(help="ReDate News Automation CLI")
 
 
+def _create_llm_engine() -> LLMEngine:
+    """Factory method to instantiate the configured LLM provider."""
+    provider = settings.LLM_PROVIDER
+
+    if provider == "gemini":
+        from .adapter_gemini import GeminiAdapter
+
+        logger.info("llm_engine_init", provider="gemini")
+        return GeminiAdapter()
+
+    elif provider == "openai":
+        from .adapter_openai import OpenAIAdapter
+
+        logger.info("llm_engine_init", provider="openai")
+        return OpenAIAdapter()
+
+    else:
+        raise ValueError(f"Unsupported LLM Provider: {provider}")
+
+
 def bootstrap() -> NewsService:
     """Dependency Injection Wiring."""
+
+    # Instantiate adapters
+    llm_engine = _create_llm_engine()
+
     return NewsService(
         fetcher=VikiNewsAdapter(),
         storage=HybridStorageAdapter(),
-        llm=GeminiAdapter(),
+        llm=llm_engine,
         publisher=WeChatAdapter(),
         image_fetcher=HybridImageAdapter(),
     )
@@ -75,9 +102,13 @@ def yearly() -> None:
         raise typer.Exit(code=1) from e
 
 
-if __name__ == "__main__":
+def cli():
     try:
         app()
     except Exception as e:
         logger.critical("system_crash", error=str(e))
         raise
+
+
+if __name__ == "__main__":
+    cli()

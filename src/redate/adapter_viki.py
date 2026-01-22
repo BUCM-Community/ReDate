@@ -1,5 +1,5 @@
 """
-src/adapter_viki.py
+redate/adapter_viki.py
 Adapter for Viki News API.
 Focus: Input cleaning, Category handling, Mapping to Domain Models, exponential backoff.
 """
@@ -14,7 +14,13 @@ import aiohttp
 from aiohttp import ClientTimeout
 from bs4 import BeautifulSoup
 from pydantic import HttpUrl
-from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .config import settings
 from .domain_models import DailyNewsBatch, Err, NewsItem, NewsNotFoundError, Ok, Result
@@ -47,7 +53,9 @@ class VikiNewsAdapter(NewsFetcher):
 
     # Only retry on standard network errors, not on 404 (which is logic flow).
     @retry(
-        retry=retry_if_exception_type((aiohttp.ClientError, aiohttp.ServerDisconnectedError)),
+        retry=retry_if_exception_type(
+            (aiohttp.ClientError, aiohttp.ServerDisconnectedError)
+        ),
         wait=wait_exponential(multiplier=1, min=2, max=30),
         stop=stop_after_attempt(5),
         # _levelToName = {
@@ -60,7 +68,9 @@ class VikiNewsAdapter(NewsFetcher):
         # }
         before_sleep=before_sleep_log(logger, 2),  # Log before retrying
     )
-    async def fetch_daily(self, target_date: date, category: str = "60s") -> Result[DailyNewsBatch, NewsNotFoundError]:
+    async def fetch_daily(
+        self, target_date: date, category: str = "60s"
+    ) -> Result[DailyNewsBatch, NewsNotFoundError]:
         """
         Fetches news from the specified Viki endpoint(s) and converts them to NewsItem objects.
         If category is None, fetches all.
@@ -90,14 +100,18 @@ class VikiNewsAdapter(NewsFetcher):
         except aiohttp.ClientResponseError as e:
             # Re-raise to let tenacity handle it ONLY if it's not 404
             if e.status == 404:
-                return Err(NewsNotFoundError(message=f"No news (404) for {target_date}"))
+                return Err(
+                    NewsNotFoundError(message=f"No news (404) for {target_date}")
+                )
             raise
         except Exception as e:
             logger.error("viki_fetch_fail", error=str(e), url=url)
             return Err(NewsNotFoundError(message=str(e)))
 
         # Standardize structure: raw_data might be {"data": [...]} or just [...]
-        data_list = raw_data.get("data", raw_data) if isinstance(raw_data, dict) else raw_data
+        data_list = (
+            raw_data.get("data", raw_data) if isinstance(raw_data, dict) else raw_data
+        )
 
         if not isinstance(data_list, list) or not data_list:
             return Err(NewsNotFoundError(message="Empty or invalid response list"))
@@ -124,14 +138,23 @@ class VikiNewsAdapter(NewsFetcher):
                 pub_date = target_date
 
             if content_text:
-                items.append(NewsItem(title=title, content=content_text.strip(), url=url_link, published_at=pub_date))
+                items.append(
+                    NewsItem(
+                        title=title,
+                        content=content_text.strip(),
+                        url=url_link,
+                        published_at=pub_date,
+                    )
+                )
 
         if not items:
             return Err(NewsNotFoundError(message="No valid items after filtering"))
 
         # Calculate idempotency hash of the RAW cleaned data (Logic Layer decision)
         # Using a stable serialization of items
-        raw_dump = json.dumps([i.model_dump() for i in items], default=str, sort_keys=True)
+        raw_dump = json.dumps(
+            [i.model_dump() for i in items], default=str, sort_keys=True
+        )
         raw_hash = hashlib.sha256(raw_dump.encode("utf-8")).hexdigest()
 
         return Ok(

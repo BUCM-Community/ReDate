@@ -1,5 +1,5 @@
 """
-src/adapter_wechat.py
+redate/adapter_wechat.py
 WeChat API Client.
 Focus: Sidecar Proxy via env vars, async I/O, Token Management.
 """
@@ -68,14 +68,18 @@ class WeChatAdapter(Publisher):
 
                 # 3. Save Cache
                 self.token_cache_path.parent.mkdir(exist_ok=True, parents=True)
-                self.token_cache_path.write_text(json.dumps({"token": token, "expires_at": time.time() + expires_in}))
+                self.token_cache_path.write_text(
+                    json.dumps({"token": token, "expires_at": time.time() + expires_in})
+                )
                 return token
 
         except aiohttp.ClientError as e:
             logger.error("wechat_network_error", error=str(e))
             raise
 
-    async def publish_article(self, title: str, html_content: str, cover_image: bytes | None) -> str:
+    async def publish_article(
+        self, title: str, html_content: str, cover_image: bytes | None
+    ) -> str:
         token = await self._get_token()
 
         # 1. Upload Cover (if exists)
@@ -85,11 +89,15 @@ class WeChatAdapter(Publisher):
 
             # Prepare Multipart/Form-Data using standard aiohttp
             data = FormData()
-            data.add_field("media", cover_image, filename="cover.png", content_type="image/png")
+            data.add_field(
+                "media", cover_image, filename="cover.png", content_type="image/png"
+            )
 
             try:
                 async with self.aclient.post(
-                    url_upload, params={"access_token": token, "type": "image"}, data=data
+                    url_upload,
+                    params={"access_token": token, "type": "image"},
+                    data=data,
                 ) as resp:
                     resp.raise_for_status()
                     res_data = await resp.json()
@@ -134,20 +142,28 @@ class WeChatAdapter(Publisher):
 
             return draft_res["media_id"]
 
-    async def upload_permanent_material(self, image_data: bytes, filename: str) -> str | None:
+    async def upload_permanent_material(
+        self, image_data: bytes, filename: str
+    ) -> str | None:
         """Uploads a permanent image material to WeChat."""
         token = await self._get_token()
         url = "https://api.weixin.qq.com/cgi-bin/material/add_material"
 
         data = FormData()
-        data.add_field("media", image_data, filename=filename, content_type="image/jpeg")
+        data.add_field(
+            "media", image_data, filename=filename, content_type="image/jpeg"
+        )
 
         try:
-            async with self.aclient.post(url, params={"access_token": token, "type": "image"}, data=data) as resp:
+            async with self.aclient.post(
+                url, params={"access_token": token, "type": "image"}, data=data
+            ) as resp:
                 resp.raise_for_status()
                 res_data = await resp.json()
                 if "media_id" in res_data:
-                    logger.info("permanent_material_uploaded", media_id=res_data["media_id"])
+                    logger.info(
+                        "permanent_material_uploaded", media_id=res_data["media_id"]
+                    )
                     return res_data["media_id"]
                 else:
                     logger.warning("permanent_upload_fail", resp=res_data)

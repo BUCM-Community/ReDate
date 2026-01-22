@@ -1,5 +1,5 @@
 # 抽象接口 (Ports)
 
-::: src.ports
+::: redate.ports
     options:
       show_submodules: false

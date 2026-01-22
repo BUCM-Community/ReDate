@@ -1,5 +1,5 @@
 # 适配器: Gemini (LLMEngine)
 
-::: src.adapter_gemini
+::: redate.adapter_gemini
     options:
       show_submodules: false

@@ -32,7 +32,7 @@ RUN uv venv $VIRTUAL_ENV && \
 FROM python:3.12-slim-bookworm AS runtime
 
 # 1. 元数据与标签 (OCI Standard)
-LABEL org.opencontainers.image.source="https://github.com/redate/redate"
+LABEL org.opencontainers.image.source="https://github.com/BUCM-Community/ReDate"
 LABEL org.opencontainers.image.description="ReDate News Automation"
 
 # 2. 安全基线：创建非 Root 用户
@@ -51,7 +51,7 @@ COPY --from=builder /build/.venv /app/.venv
 
 # 5. 复制源代码
 WORKDIR /app
-COPY src/ ./src/
+COPY src/redate/ ./redate/
 
 # 6. 配置环境变量
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -70,4 +70,4 @@ USER redate
 
 # 9. 入口点
 # 容器默认行为，强制要求参数
-ENTRYPOINT ["python", "src/main.py"]
+ENTRYPOINT ["python", "redate/main.py"]

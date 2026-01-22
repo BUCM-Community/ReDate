@@ -7,32 +7,33 @@ ReDate 采用 **六边形架构 (Hexagonal Architecture)**，也称为 **端口�
 项目的物理结构与逻辑层次严格对应，从内到外依次为：
 
 ### 核心领域层 (Domain Layer)
-- **文件**: `src/domain_models.py`
+- **文件**: `redate/domain_models.py`
 - **职责**: 定义系统中最核心的实体和数据结构。
 - **特性**: 
     - 使用 Pydantic 的 `frozen=True` 模型，确保领域对象的不变性。
     - 包含业务规则相关的逻辑（如 `fingerprint` 计算）。
-    - 绝对不依赖 `src/` 下的其他模块。
+    - 绝对不依赖 `redate/` 下的其他模块。
 
 ### 端口层 (Ports Layer)
-- **文件**: `src/ports.py`
+- **文件**: `redate/ports.py`
 - **职责**: 定义基础设施必须遵守的接口契约。
 - **特性**:
     - 使用 Python 的 `typing.Protocol` 实现结构化子类型（鸭子类型）。
     - 定义了 `NewsFetcher`, `StorageAdapter`, `LLMEngine` 等核心接口。
 
 ### 业务应用层 (Application Layer)
-- **文件**: `src/service_news.py`
+- **文件**: `redate/service_news.py`
 - **职责**: 编排业务流程（工作流）。
 - **特性**:
     - 不关心具体的实现（如存入的是 R2 还是 S3），只通过“端口”与外界交互。
     - 处理异常流程、日志记录及业务指标。
 
 ### 基础设施适配层 (Infrastructure / Adapters)
-- **文件**: `src/adapter_*.py`, `src/utils_*.py`
+- **文件**: `redate/adapter_*.py`, `redate/utils_*.py`
 - **职责**: 实现端口定义的接口，处理具体的外部系统集成。
 - **特性**:
     - `GeminiAdapter`: 集成 Google Gemini API。
+    - `OpenAIAdapter`: 集成 OpenAI Response API。
     - `HybridStorageAdapter`: 同时管理 R2 对象存储与 LanceDB 向量数据库。
     - `VikiNewsAdapter`: 从viki API拉取不同类别的信息。
     - `HybridImageAdapter`: 从多个可免费商用图片来源以关键词限制方式拉取图片。
@@ -48,7 +49,7 @@ ReDate 采用 **六边形架构 (Hexagonal Architecture)**，也称为 **端口�
 高层模块（`NewsService`）不应依赖低层模块（`GeminiAdapter`），两者都应依赖于抽象（`LLMEngine` 协议）。这种设计使得我们可以在测试时轻松注入 Mock 对象，或者在未来更换 AI 引擎。
 
 ### Result 模式 (Monadic Error Handling)
-受 Rust 和函数式编程启发，我们在 `src/domain_models.py` 中实现了 `Result[T, E]` 类型。
+受 Rust 和函数式编程启发，我们在 `redate/domain_models.py` 中实现了 `Result[T, E]` 类型。
 - 相比于抛出异常，显式的 `Ok` 和 `Err` 返回值强制调用者处理错误分支。
 - 这极大提高了系统的稳健性，尤其是在处理网络不稳定的外部 API 时。
 

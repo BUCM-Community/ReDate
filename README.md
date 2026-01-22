@@ -31,8 +31,13 @@
 
 ## Get Started!
 
-### 1. 安装 Pixi
+### 1. Pixi 和 Dependency 安装
 参考 [Pixi 官方文档](https://pixi.prefix.dev/latest/#installation) 进行安装。
+
+环境搭建：
+```bash
+pixi install
+```
 
 ### 2. 配置环境
 复制环境模板并填写必要的 API Key：
@@ -57,16 +62,8 @@ pixi run start-yearly
 
 ## Development
 ## TODO List
-- 本项目目前仍在搭建脚手架，尚处于概念验证阶段，GitHub Actions暂时禁用。
-- 待完成下面的任务后，将发布目前方案选型的第一版。
+- 本项目仍在搭建脚手架，尚处于概念验证阶段，GitHub Actions暂时禁用。
 - 建议查看`docs/index.md`，注意PR不能直接推送到main分支。
-
-[ ] 完成 `pixi.toml`中的正确环境配置，比如`build-variants`  
-[ ] GitHub Actions的适配  
-[ ] docker相关配置的适配  
-[ ] 文档配置和文档的适配  
-[ ] 业务逻辑验证和测试  
-[ ] 其他琐碎的 DEBUG  
 
 ### 代码规范与质量保证
 本项目执行严格的代码审查与类型检查：

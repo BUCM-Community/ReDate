@@ -1,5 +1,5 @@
 """
-src/service_news.py
+redate/service_news.py
 Orchestrates the data pipeline (Fetch -> Store -> Analyze -> Publish).
 Focus: Idempotency, Logic Flow, Error handling via Result.
 """
@@ -10,7 +10,11 @@ import json
 from typing import TYPE_CHECKING
 
 from .domain_models import Err, Ok
-from .utils_date import get_beijing_today, get_previous_week_range, get_previous_year_range
+from .utils_date import (
+    get_beijing_today,
+    get_previous_week_range,
+    get_previous_year_range,
+)
 from .utils_telemetry import logger
 
 if TYPE_CHECKING:
@@ -43,7 +47,8 @@ class NewsService:
         1. Fetch News
         2. Check Idempotency (Hash)
         3. Archive Raw
-        4. Vectorize & Save
+        4. Analyze (Extract Keywords & Knowledge Graph)
+        5. Vectorize & Save All
         """
         logger.info("daily_job_start", date=str(target_date), category=category)
 
@@ -57,37 +62,55 @@ class NewsService:
                 logger.info("fetch_success", count=len(batch.items))
 
         # 2. Idempotency Check (Check-Then-Act)
-        # We use the hash of the raw JSON to detect if we already processed this exact data
         if await self.storage.check_exists(batch.raw_json_hash, batch.source):
             logger.info("job_skipped_idempotent", hash=batch.raw_json_hash)
             return
 
         # 3. Archive Raw (R2)
-        # Serialization for storage
-        raw_json_bytes = json.dumps([item.model_dump() for item in batch.items], default=str).encode("utf-8")
-
+        raw_json_bytes = json.dumps(
+            [item.model_dump() for item in batch.items], default=str
+        ).encode("utf-8")
         archive_key = f"news/{category}/{target_date.isoformat()}.json"
         await self.storage.archive_raw(archive_key, raw_json_bytes)
 
-        # 4. Generate Embedding
-        # Create a single text blob for the day
+        # 4. AI Analysis & Vectorization
+        # Create a single text blob for the day for embedding
         full_text_blob = "\n".join([f"{i.title}: {i.content}" for i in batch.items])
+
         try:
+            # A. Embedding (RAG)
             vector = await self.llm.generate_embedding(full_text_blob)
-            # Save to Vector DB (LanceDB)
+
+            # B. Knowledge Extraction (KG + Keyword)
+            # This creates the Knowledge Graph data for the "Three Ways" report later
+            knowledge_result = await self.llm.extract_knowledge(full_text_blob)
+
+            # 5. Save (LanceDB + Metadata)
             await self.storage.save_embedding(batch, vector)
-        except Exception:
-            # If embedding fails, we still have archived data. Re-throw to alert CI.
+            await self.storage.save_knowledge(batch, knowledge_result)
+
+            logger.info(
+                "daily_analysis_complete",
+                keywords=len(knowledge_result.keywords),
+                triples=len(knowledge_result.triples),
+            )
+
+        except Exception as e:
+            logger.error("daily_analysis_failed", error=str(e))
+            # If AI fails, we re-throw because our data is incomplete for RAG
             raise
 
     async def run_weekly_workflow(self):
         """
         Summarizes the previous week (Monday to Sunday).
-        Should be triggered on Monday.
+        Uses 'Three Ways' retrieval context.
         """
         start_date, end_date = get_previous_week_range(self.today)
         logger.info(
-            "weekly_job_start", trigger_date=str(self.today), report_start=str(start_date), report_end=str(end_date)
+            "weekly_job_start",
+            trigger_date=str(self.today),
+            report_start=str(start_date),
+            report_end=str(end_date),
         )
         await self._run_period_report(start_date, end_date, "Weekly")
 
@@ -99,31 +122,46 @@ class NewsService:
         await self._run_period_report(start_date, end_date, "Yearly")
 
     async def _run_period_report(self, start: date, end: date, period_type: str):
-        """Shared logic for periodic reporting."""
-        logger.info(f"{period_type.lower()}_job_start", trigger_date=str(self.today), start=str(start), end=str(end))
+        """Shared logic for periodic reporting using Hybrid Context."""
+        logger.info(
+            f"{period_type.lower()}_job_start",
+            trigger_date=str(self.today),
+            start=str(start),
+            end=str(end),
+        )
 
-        # 1. Retrieve Context from LanceDB
-        contexts = await self.storage.get_date_range_context(start, end)
-        if not contexts:
+        # 1. Retrieve Comprehensive Context (Vector + Keywords + KG)
+        # This fulfills the "Three Ways" requirement
+        retrieval_context = await self.storage.get_comprehensive_context(start, end)
+
+        # Check if we have *any* data
+        if (
+            not retrieval_context.vector_results
+            and not retrieval_context.knowledge_graph_summary
+        ):
             logger.warning(f"no_data_for_{period_type.lower()}_report")
             return
 
         # 2. LLM Synthesis
+        # Pass the context to the LLM to generate the report
         try:
-            report = await self.llm.generate_period_report(contexts, start, end, period_type)
+            report = await self.llm.generate_period_report(
+                retrieval_context, start, end, period_type
+            )
         except Exception as e:
             logger.error("report_generation_failed", error=str(e))
             raise
 
         # 3. Publish
-        # Note: Yearly report might need a special cover, currently set to None (Default)
         try:
             draft_id = await self.publisher.publish_article(
                 title=f"ReDate {period_type} Review: {start} ~ {end}",
                 html_content=(
                     f"<h1>{period_type} Review</h1>"
                     f"<p>{report.summary_text}</p>"
-                    "<h3>Key Highlights</h3><ul>" + "".join([f"<li>{k}</li>" for k in report.key_events]) + "</ul>"
+                    "<h3>Key Highlights</h3><ul>"
+                    + "".join([f"<li>{k}</li>" for k in report.key_events])
+                    + "</ul>"
                 ),
                 cover_image=None,
             )

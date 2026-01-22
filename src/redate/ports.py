@@ -1,5 +1,5 @@
 """
-src/ports.py
+redate/ports.py
 Defines abstract interfaces (Protocols) for infrastructure adapters.
 Focus: Dependency Inversion, Logic/Infra decoupling.
 """
@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from .domain_models import DailyNewsBatch, NewsNotFoundError, Result, WeeklyReport
+from .domain_models import (
+    DailyNewsBatch,
+    KnowledgeExtractionResult,
+    NewsNotFoundError,
+    Result,
+    RetrievalContext,
+    WeeklyReport,
+)
 
 if TYPE_CHECKING:
     from datetime import date
@@ -52,8 +59,21 @@ class StorageAdapter(Protocol):
         """Saves metadata and vector to LanceDB."""
         ...
 
-    async def get_date_range_context(self, start: date, end: date) -> list[str]:
-        """Retrieves raw texts for summaries (Weekly/Yearly)."""
+    async def save_knowledge(
+        self, batch: DailyNewsBatch, knowledge: KnowledgeExtractionResult
+    ) -> None:
+        """Saves extracted keywords and knowledge graph triples."""
+        ...
+
+    async def get_comprehensive_context(
+        self, start: date, end: date
+    ) -> RetrievalContext:
+        """
+        Retrieves context using 'Three Ways':
+        1. Vector Search (Semantic)
+        2. Keyword Match (Topical)
+        3. Knowledge Graph (Relational)
+        """
         ...
 
 
@@ -65,9 +85,17 @@ class LLMEngine(Protocol):
 
     async def summarize_daily(self, text: str) -> str: ...
 
+    async def extract_knowledge(self, text: str) -> KnowledgeExtractionResult:
+        """Extracts keywords and KG triples using structured output."""
+        ...
+
     # support both Weekly and Yearly
     async def generate_period_report(
-        self, contexts: list[str], start_date: date, end_date: date, period_type: str = "Weekly"
+        self,
+        context: RetrievalContext,
+        start_date: date,
+        end_date: date,
+        period_type: str = "Weekly",
     ) -> WeeklyReport: ...
 
 
@@ -75,10 +103,14 @@ class LLMEngine(Protocol):
 class Publisher(Protocol):
     """Interface for Publishing (WeChat)."""
 
-    async def publish_article(self, title: str, html_content: str, cover_image: bytes | None) -> str:
+    async def publish_article(
+        self, title: str, html_content: str, cover_image: bytes | None
+    ) -> str:
         """Returns the publication ID (e.g., media_id) or URL."""
         ...
 
-    async def upload_permanent_material(self, image_data: bytes, filename: str) -> str | None:
+    async def upload_permanent_material(
+        self, image_data: bytes, filename: str
+    ) -> str | None:
         """Uploads a permanent image material."""
         ...

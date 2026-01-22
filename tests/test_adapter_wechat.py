@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.adapter_wechat import WeChatAdapter
+from redate.adapter_wechat import WeChatAdapter
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
 """
-src/domain_models.py
+redate/domain_models.py
 Core business data structures and monadic error handling types.
-Focus: No-GIL safety (immutability), Result Pattern.
+Focus: No-GIL safety (immutability), Result Pattern, Knowledge Graph Structures.
 """
 
 from __future__ import annotations
@@ -18,7 +18,10 @@ __all__ = [
     "AppError",
     "NewsNotFoundError",
     "NewsItem",
+    "KnowledgeTriple",
+    "KnowledgeExtractionResult",
     "DailyNewsBatch",
+    "RetrievalContext",
     "WeeklyReport",
 ]
 
@@ -57,6 +60,60 @@ class NewsNotFoundError(AppError):
     code: str = "NEWS_NOT_FOUND"
 
 
+# --- Knowledge Graph & Metadata Models ---
+class KnowledgeTriple(BaseModel):
+    """Represents a Subject-Predicate-Object relationship."""
+
+    model_config = ConfigDict(frozen=True)
+
+    subject: str = Field(description="The source entity")
+    predicate: str = Field(description="The relationship or action")
+    object: str = Field(description="The target entity")
+
+
+class KnowledgeExtractionResult(BaseModel):
+    """Container for AI-analyzed metadata."""
+
+    model_config = ConfigDict(frozen=True)
+
+    keywords: list[str] = Field(description="Top topical keywords")
+    triples: list[KnowledgeTriple] = Field(description="Knowledge graph relationships")
+
+
+class RetrievalContext(BaseModel):
+    """Aggregated context from multiple retrieval strategies."""
+
+    model_config = ConfigDict(frozen=True)
+
+    vector_results: list[str] = Field(description="Semantically similar text chunks")
+    keyword_matches: list[str] = Field(
+        description="Content matched by high-frequency keywords"
+    )
+    knowledge_graph_summary: list[str] = Field(
+        description="Textualized graph relationships"
+    )
+
+    def to_prompt_string(self) -> str:
+        """Formats the context for LLM ingestion."""
+        parts = []
+        if self.knowledge_graph_summary:
+            parts.append(
+                "=== KNOWLEDGE GRAPH (Relationships) ===\n"
+                + "\n".join(self.knowledge_graph_summary)
+            )
+        if self.keyword_matches:
+            parts.append(
+                "=== KEYWORD HIGHLIGHTS (Topics) ===\n"
+                + "\n".join(self.keyword_matches)
+            )
+        if self.vector_results:
+            parts.append(
+                "=== DETAILED CONTENT (Semantic Search) ===\n"
+                + "\n".join(self.vector_results)
+            )
+        return "\n\n".join(parts)
+
+
 # --- Domain Entities ---
 class NewsItem(BaseModel):
     """Represents a single piece of news (Immutable)."""
@@ -89,6 +146,9 @@ class DailyNewsBatch(BaseModel):
 
     # Pre-calculated hash of the raw JSON response for idempotency
     raw_json_hash: str
+
+    # AI-Enriched Data (Optional, populated after ingestion)
+    ai_analysis: KnowledgeExtractionResult | None = None
 
 
 class WeeklyReport(BaseModel):

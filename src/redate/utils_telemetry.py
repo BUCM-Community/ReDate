@@ -1,5 +1,5 @@
 """
-utils_telemetry.py
+redate/utils_telemetry.py
 Configures structured JSON logging suitable for R2 storage and CloudWatch.
 """
 
@@ -34,10 +34,10 @@ def configure_logging() -> None:
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
+        structlog.processors.JSONRenderer(),
     ]
 
     # Console (GitHub Actions) + File (Artifact/R2)

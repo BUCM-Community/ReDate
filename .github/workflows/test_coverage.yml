@@ -4,37 +4,45 @@ on:
   pull_request:
     branches:
       - dev
+      - main
     paths:
-      - 'src/**'
+      - 'redate/**'
       - 'tests/**'
       - 'pyproject.toml'
       - 'pixi.toml'
+      - '.github/workflows/test_coverage.yml'
 
 jobs:
-  test:
-    name: Run Pytest & Coverage
+  test-matrix:
+    name: Test (Python ${{ matrix.environment }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # 排查特定版本兼容性
+      matrix:
+        environment: [test-311, test-312, test-313, test-314]
+
     steps:
       - uses: actions/checkout@v4
       
       - name: Setup Pixi
         uses: prefix-dev/setup-pixi@v0.9.3
         with:
-          pixi-version: v0.63.0
+          pixi-version: v0.63.1
           cache: true
-          environments: dev
-
-      - name: Install Dependencies
-        run: pixi install -e dev
+          # 动态激活矩阵中对应的环境
+          environments: ${{ matrix.environment }}
 
       - name: Run Tests with Coverage
-        # 使用 pixi run pytest 配合 pytest-cov
-        run: pixi run coverage
+        # 指定环境运行 coverage 任务
+        run: pixi run --environment ${{ matrix.environment }} coverage
 
-      - name: Report Coverage
+      - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+          # 使用 flags 区分不同环境的报告
+          flags: ${{ matrix.environment }}
+          name: codecov-${{ matrix.environment }}
           fail_ci_if_error: true
           verbose: true

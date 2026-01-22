@@ -1,5 +1,5 @@
 """
-src/adapter_image.py
+redate/adapter_image.py
 Adapter for fetching images from free stock photo sites (Unsplash, Pexels, Pixabay).
 Implements a multi-source fallback strategy with keyword targeting.
 """
