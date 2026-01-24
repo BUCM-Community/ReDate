@@ -20,7 +20,7 @@
 
 本项目依赖以下现代化技术栈：
 
-- **运行时/包管理**: [Pixi](https://pixi.prefix.dev/) (基于 Conda 的跨平台包管理器)
+- **运行时/包管理**: [Pixi](https://pixi.prefix.dev/) (基于 Conda 生态和 uv-solver 的跨平台包管理器)
 - **编程语言**: Python 3.12+ (强类型支持)
 - **AI 引擎**: [Google Gemini (google-genai)](https://googleapis.github.io/python-genai/)
 - **存储**:
@@ -45,7 +45,7 @@ pixi install
 cp .env.example .env
 # 编辑 .env 文件，填入 Gemini, R2, WeChat 等配置
 ```
-请注意不要将`.env`上传公开以免API Key泄露，建议使用**系统环境变量**。
+请注意不要硬编码或者将`.env`上传公开以免API Key泄露，建议使用**系统环境变量**。
 
 ### 3. 运行项目
 使用 Pixi 运行预定义的任务：
@@ -63,7 +63,7 @@ pixi run start-yearly
 ## Development
 ## TODO List
 - 本项目仍在搭建脚手架，尚处于概念验证阶段，GitHub Actions暂时禁用。
-- 建议查看`docs/index.md`，注意PR不能直接推送到main分支。
+- 建议查看`docs/index.md`，注意PR不能直接推送到main分支，具体的贡献指南请查看 **[CONTRIBUTING.md](./.github/CONTRIBUTING.md)**。
 
 ### 代码规范与质量保证
 本项目执行严格的代码审查与类型检查：

@@ -1,0 +1,51 @@
+name: Bug Report
+description: 创建一个报告来帮助我们修复问题
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您花费时间填写此Bug报告！
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 (Description)
+      description: 请清晰简洁地描述发生了什么Bug。
+      placeholder: 当我运行命令时...
+    validations:
+      required: true
+  - type: input
+    id: reproduction
+    attributes:
+      label: 复现步骤 (Steps to Reproduce)
+      description: 如何触发这个 Bug？
+      placeholder: 1. Go to '...' 2. Click on '....' 3. Scroll down to '....'
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 运行环境 (Environment)
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - iOS
+        - Android
+        - Web 浏览器
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 错误日志/截图
+      description: 请粘贴控制台报错或拖拽上传截图。
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: 行为准则
+      options:
+        - label: 我同意遵守本项目的 Code of Conduct
+          required: true
