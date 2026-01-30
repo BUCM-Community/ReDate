@@ -1,3 +1,6 @@
+# =============================================================================
+# ARCHITECTURE GUARDRAILS (Strict Layering & Independence)
+# =============================================================================
 [importlinter]
 root_package = redate
 include_external_packages = True
@@ -12,24 +15,25 @@ include_external_packages = True
 name = Enforce Physical Layer Hierarchy
 type = layers
 layers =
-    # Level 1: Entry Points (Can import everything)
+    # Level 1: Entry Points (CLI, API handlers)
     redate.main
-    
-    # Level 2: Business Logic & Infrastructure (Siblings in physical file structure)
-    # Note: We group them here for general layering, but split logic in Contract 2.
-    redate.service_news | redate.adapter_.* | redate.utils_.*
-    
-    # Level 3: Interfaces (Ports)
-    redate.ports
-    
-    # Level 4: Core Domain (Pure Python, No external I/O deps ideally)
+    # Level 2: Business Logic (Services) & Interfaces (Ports)
+    # Service 层协调业务，Ports 定义接口
+    redate.service_.* | redate.ports
+    # Level 3: Adapters (Infrastructure Implementation)
+    # 适配器实现 Ports 接口，被 Service 调用（通过依赖注入）
+    # 注意：物理上 Service 和 Adapter 可能同级，但逻辑上 Service 不应直接 import Adapter 具体实现
+    redate.adapter_.*
+    # Level 4: Core Domain (Pure Python Entities)
     redate.domain_models
+    # Level 5: Shared Utils
+    redate.utils_.*
 
 # =============================================================================
 # CONTRACT 2: DEPENDENCY INVERSION PRINCIPLE (DIP)
 # =============================================================================
-# Crucial: The Application Layer (Service) must NOT depend on Infrastructure (Adapters).
-# It must only depend on Ports.
+# 核心业务逻辑 (Service) 禁止直接导入基础设施实现 (Adapter)
+# 必须通过 Ports (Interfaces) 进行交互
 [importlinter:contract:2]
 name = Enforce Dependency Inversion (Service -> X -> Adapter)
 type = forbidden
@@ -57,15 +61,18 @@ source_modules =
     redate.domain_models
 forbidden_modules =
     redate.main
-    redate.service_news
+    redate.service_.*
     redate.ports
     redate.adapter_.*
     # Prevent accidental usage of heavy external libs in domain
     fastapi
     flask
     django
+    pydantic_settings
     boto3
+    aioboto3
     google.generativeai
+    google.genai
 
 # =============================================================================
 # CONTRACT 4: INFRASTRUCTURE ISOLATION
@@ -80,4 +87,5 @@ modules =
     redate.adapter_openai
     redate.adapter_storage
     redate.adapter_viki
+    redate.adapter_image
     redate.adapter_wechat

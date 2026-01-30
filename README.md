@@ -4,10 +4,10 @@
 
 ## 简介
 ### 作用
-`ReDate` 是一个自动化新闻聚合与发布平台（目前只针对WeChat公众号）。它能够定期从多种数据源（如 Viki 60s）抓取信息，利用 Google Gemini 等大语言模型进行内容的深度理解与摘要生成，并自动将整理好的内容推送到微信公众号等社交媒体平台。
+`ReDate` 是一个自动化新闻聚合与发布平台（目前只针对WeChat公众号）。它能够定期从多种数据源（如 [Viki 60s](https://github.com/vikiboss/60s)）抓取信息，利用 Google Gemini 等大语言模型进行内容的深度理解与摘要生成，并自动将整理好的内容推送到微信公众号等社交媒体平台。
 
 其核心功能包括：
-- **每日抓取与归档**：自动获取每日新闻，进行去重校验，并存储至 Cloudflare R2 及 LanceDB 向量数据库。
+- **每日抓取与归档**：自动获取每日新闻，进行去重校验，并存储至 Cloudflare R2 / SeaweedFS 对象存储库 及 LanceDB 向量数据库。
 - **周期性回顾**：基于过去一周或一年的累积数据，利用 AI 生成具有深度见解的周报或年终总结。
 - **自动化发布**：全自动化的微信公众号草稿箱发布流程，支持封面图自动匹配与上传。
 - **现代化架构**：采用六边形架构（Hexagonal Architecture），实现业务逻辑与基础设施的完全解耦，具备高度的可测试性和可扩展性。
@@ -21,34 +21,47 @@
 本项目依赖以下现代化技术栈：
 
 - **运行时/包管理**: [Pixi](https://pixi.prefix.dev/) (基于 Conda 生态和 uv-solver 的跨平台包管理器)
-- **编程语言**: Python 3.12+ (强类型支持)
-- **AI 引擎**: [Google Gemini (google-genai)](https://googleapis.github.io/python-genai/)
+- **编程语言**: Python 3.11-3.14
+- **AI 引擎**: [Google Gemini (google-genai)](https://googleapis.github.io/python-genai/) and [OpenRouter](https://openrouter.ai/docs/quickstart) / [SiliconFlow](https://www.siliconflow.com/) (OpenAI API)
 - **存储**:
-    - **对象存储**: Cloudflare R2 (S3 兼容)
+    - **对象存储**: [Cloudflare R2](https://developers.cloudflare.com/r2/get-started/) / [SeaweedFS](https://github.com/seaweedfs/seaweedfs) ([S3 Protocol Based](https://docs.aws.amazon.com/AmazonS3/latest/API/Type_API_Reference.html))
     - **向量数据库**: [LanceDB](https://lancedb.com/)
-- **网络代理**: [Gost](https://github.com/ginuerzh/gost) (用于绕过部分 API 的网络限制)
+- **网络代理**: [Gost](https://github.com/ginuerzh/gost) (用于绕过WeChat API 的网络限制)
 - **文档**: MkDocs (Material theme)
 
 ## Get Started!
 
 ### 1. Pixi 和 Dependency 安装
-参考 [Pixi 官方文档](https://pixi.prefix.dev/latest/#installation) 进行安装。
 
-环境搭建：
+**CAUTION:**
+- 参考 [Pixi 官方文档](https://pixi.prefix.dev/latest/#installation) 安装 `pixi`。
+- DO NOT 硬编码或者将`.env`上传公开以免API Key泄露，建议使用**系统环境变量**。
+
 ```bash
+# 1. (可选) 如果未安装 pixi，请先执行安装
+# curl -fsSL https://pixi.sh/install.sh | bash
+
+# 2. 克隆仓库
+git clone https://github.com/BUCM-Community/ReDate.git
+
+# 3. 进入项目目录
+cd ReDate
+
+# 4. 安装依赖 (基于 pixi.toml)
+# 这将自动创建虚拟环境并安装 Python、PyArrow、LanceDB 等所有依赖
 pixi install
-```
 
-### 2. 配置环境
-复制环境模板并填写必要的 API Key：
-```bash
+# 5. 初始化配置文件
+# 复制示例配置，后续请编辑 .env 填入 API Key
 cp .env.example .env
-# 编辑 .env 文件，填入 Gemini, R2, WeChat 等配置
-```
-请注意不要硬编码或者将`.env`上传公开以免API Key泄露，建议使用**系统环境变量**。
 
-### 3. 运行项目
-使用 Pixi 运行预定义的任务：
+# 6. 验证安装
+# 运行帮助命令，确保环境正常
+pixi run python -m redate.main --help
+```
+
+### 2. 运行预定义任务
+
 ```bash
 # 运行每日任务
 pixi run start-daily

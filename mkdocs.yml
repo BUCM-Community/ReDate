@@ -90,6 +90,7 @@ nav:
       - Cli (Entry): reference/main.md
   - Core Logic:
       - Orchestrator: reference/service_news.md
+      - Orchestrator: reference/service_migration.md
       - Configuration: reference/config.md
   - Infrastructure (Adapters):
       - Viki News (Source): reference/adapter_viki.md

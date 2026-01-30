@@ -44,6 +44,8 @@ def parse_author(author_str: str) -> dict[str, str]:
     Parses 'Name <email>' into {'name': 'Name', 'email': 'email'}.
     Fallback to {'name': author_str} if format doesn't match.
     """
+    if not isinstance(author_str, str):
+        return {"name": str(author_str)}
     match = re.match(r"^(?P<name>.*?)\s*<(?P<email>.*?)>$", author_str.strip())
     if match:
         return match.groupdict()
@@ -116,6 +118,7 @@ def sync_metadata() -> None:
     target_authors_structured = [parse_author(a) for a in target_authors_raw]
 
     # Compare structure content, not just reference
+    # Use explicit comparison to avoid ordering issues causing flux
     current_authors = project_table.get("authors")
     if current_authors != target_authors_structured:
         project_table["authors"] = target_authors_structured

@@ -1,0 +1,59 @@
+# redate-compose.yml
+# ==============================================================================
+# ReDate Production Deployment (Cloud Simulation)
+# ==============================================================================
+services:
+  # ==========================================
+  # 基础设施层
+  # ==========================================
+  proxy-sidecar:
+    image: gogost/gost:3.2
+    container_name: redate-proxy
+    read_only: true
+    volumes:
+      - ./config/gost-client.yaml:/etc/gost/config.yaml:ro
+      - ./secrets/certs:/certs:ro # 挂载证书
+      - ./secrets/ssh:/ssh:ro     # 挂载 SSH Key
+    networks:
+      - redate-mesh
+    # 健康检查：确保本地端口已开启
+    healthcheck:
+      test: ["CMD", "gost", "-V"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ==========================================
+  # 业务逻辑层
+  # ==========================================
+  worker:
+    image: ghcr.io/bucm-community/redate:latest
+    user: redate
+    read_only: true # [Security] 只读根文件系统
+    tmpfs:
+      - /tmp
+    volumes:
+      - redate-data:/app/data # 仅数据目录可写（通过 Volume）
+    environment:
+      - APP_ENV=prod
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+      - ALL_PROXY=socks5://proxy-sidecar:1080
+      - WECHAT_PROXY_URL=socks5://proxy-sidecar:1080
+    networks:
+      - redate-mesh
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    depends_on:
+      proxy-sidecar:
+        condition: service_healthy
+
+networks:
+  redate-mesh:
+    driver: bridge
+
+volumes:
+  redate-data:

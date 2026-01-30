@@ -48,6 +48,7 @@ docs-build = "mkdocs build"
 [dependencies]
 # 基础科学计算与工具库
 numpy = ">=2.4.0, <3"
+pyarrow = ">=23.0.0, <24"
 # 显式加入 ca-certificates，解决内网/Windows下的SSL证书信任问题
 ca-certificates = "*"
 

@@ -1,10 +1,11 @@
-name: ReDate Pipeline
+# .github/workflows/redate_pipeline.yml
+name: ReDate Production Pipeline
 
 on:
-  # 代码合并到 main 时生成 pyproject.toml
   push:
-    branches:
-      - main
+    branches: [ "dev", "main" ]
+  pull_request:
+    branches: [ "dev", "main" ]
   schedule:
     # 1. Daily Ingest: 北京时间 16:30 => UTC 08:30
     - cron: '30 8 * * *'
@@ -28,118 +29,108 @@ on:
         description: 'Specific Date (YYYY-MM-DD, Optional for daily)'
         required: false
 
-permissions:
-  contents: write # For committing pyproject.toml
-  security-events: write # For Trivy SARIF upload
-
 env:
-  IMAGE_NAME: redate
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
   IMAGE_TAG: latest
 
 jobs:
-  # --------------------------------------------------------------------------
-  # Job 1: Sync & Quality Gate
-  # --------------------------------------------------------------------------
-  sync-and-check:
-    name: Sync Metadata & Check
+  # --- Stage 1: Quality Assurance ---
+  check-and-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       
+      # 使用 setup-pixi 获得极速缓存
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
-          pixi-version: v0.63.1
+          pixi-version: v0.63.2
           cache: true
+          # 仅安装 dev 环境用于检查
           environments: default
 
-      # Requirement: Export pyproject.toml when merging to main
-      - name: Sync Metadata
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: pixi run export-meta
-      
-      - name: Commit pyproject.toml
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: sync pyproject.toml from pixi.toml [skip ci]"
-          file_pattern: pyproject.toml
+      - name: Verify Lockfile
+        run: pixi install --locked
 
-      - name: Static Analysis (ruff & mypy)
+      - name: Architecture Contract Check
+        run: pixi run contract-check
+
+      - name: Lint & Format Check
         run: |
           pixi run lint
-          pixi run typecheck
-          pixi run contract-check
+          pixi run format --check
 
-  # --------------------------------------------------------------------------
-  # Job 2: 构建、安全扫描与 SBOM (Secure Build)
-  # --------------------------------------------------------------------------
-  build-secure:
-    name: Build, Scan & SBOM
-    needs: sync-and-check
+      - name: Type Check
+        run: pixi run typecheck
+
+  # --- Stage 2: Build & Secure ---
+  build-and-scan:
+    needs: check-and-lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
+      packages: write
+      security-events: write # 用于上传 Trivy 结果
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and Export Image
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 构建镜像并导出到本地 Docker Daemon (用于扫描)
+      - name: Build and Load
         uses: docker/build-push-action@v5
         with:
           context: .
           load: true # 导出到 Docker Daemon 以便后续扫描
-          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # --- Security: Vulnerability Scanning ---
+      # Security: 扫描镜像漏洞
       - name: Run Trivy Vulnerability Scanner
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest'
           format: 'table'
-          exit-code: '1'       # 发现高危漏洞(Critical)则阻断构建
+          exit-code: '1' # 发现高危漏洞则失败
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
-      # --- Security: SBOM Generation (Software Bill of Materials) ---
-      - name: Generate SBOM
-        uses: aquasecurity/trivy-action@v0.29.0
+      # Security: 生成 SBOM
+      - name: Generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest'
           format: 'cyclonedx'
-          output: 'sbom.json'
+          output: 'sbom.cyclonedx.json'
 
-      - name: Upload SBOM Artifact
+      - name: Upload SBOM
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-cyclonedx
-          path: sbom.json
+          name: sbom
+          path: sbom.cyclonedx.json
           retention-days: 5
 
-      # --- Export Image for Runtime Job ---
-      - name: Save Docker Image
-        run: docker save ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} -o redate_image.tar
-
-      - name: Upload Image Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: redate_image.tar
-          retention-days: 1
+      # Push 镜像 (仅在非 PR 时)
+      - name: Push Image
+        if: github.event_name != 'pull_request'
+        run: docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   # --------------------------------------------------------------------------
   # Job 3: 业务执行 (Runtime Execution)
   # --------------------------------------------------------------------------
   execute-pipeline:
     name: Execute Logic (Sidecar Pattern)
-    needs: build-secure
+    needs: build-and-scan
     # 仅在 定时任务(schedule) 或 手动触发(workflow_dispatch) 时运行业务逻辑
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -187,9 +178,9 @@ jobs:
       # 所有的业务流量将通过 localhost:1080 (SOCKS5) 转发
       - name: Start Gost Sidecar
         run: |
-          docker network create redate-net
+          docker network create redate-mesh
           docker run -d --name gost-sidecar \
-            --network redate-net \
+            --network redate-mesh \
             --restart always \
             -v $(pwd)/config:/config \
             -v $(pwd)/secrets:/secrets \
@@ -228,7 +219,6 @@ jobs:
           echo "args=$DATE_ARG" >> $GITHUB_OUTPUT
 
       # 5. 执行主容器 (Single Container Architecture)
-      # 共享 Gost Sidecar 的网络命名空间是不支持跨容器直接 localhost 的 (除非 Kubernetes Pod)
       # 在 Docker 中，我们使用 --network container:gost-sidecar 模式来实现 Pod 级网络共享
       # 或者使用自定义网络并指向服务名 (setup: WECHAT_PROXY_URL=socks5://gost-sidecar:1080)
       - name: Run ReDate Core
@@ -249,13 +239,13 @@ jobs:
           # 微信发布
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
-          # 关键: 在 redate-net 网络中，Gost 容器名为 gost-sidecar
+          # 关键: 在 redate-mesh 网络中，Gost 容器名为 gost-sidecar
           WECHAT_PROXY_URL: "socks5://gost-sidecar:1080"
           PYTHONPATH: "src" # 确保可以直接 import redate
           
         run: |
           docker run --rm \
-            --network redate-net \
+            --network redate-mesh \
             --name redate-worker \
             -e VIKI_API_BASE \
             -e R2_ACCOUNT_ID -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY -e R2_ENDPOINT -e R2_BUCKET_NAME \

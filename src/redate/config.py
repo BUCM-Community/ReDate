@@ -22,12 +22,29 @@ class Settings(BaseSettings):
     # --- Sources (Viki API) ---
     VIKI_API_BASE: HttpUrl
 
-    # --- R2 Storage (S3 Compatible) ---
-    R2_ACCOUNT_ID: str
-    R2_ACCESS_KEY_ID: SecretStr
-    R2_SECRET_ACCESS_KEY: SecretStr
-    R2_ENDPOINT: HttpUrl
-    R2_BUCKET_NAME: str
+    # --- Storage Selection ---
+    # "remote": Use Cloudflare R2 (S3) + LanceDB S3
+    # "local": Use SeaweedFS (S3) + LanceDB Local Disk
+    DEPLOY_MODE: Literal["remote", "local"] = "local"
+
+    # --- R2 Storage (Remote / Cloud) ---
+    R2_ACCOUNT_ID: str | None = None
+    R2_ACCESS_KEY_ID: SecretStr | None = None
+    R2_SECRET_ACCESS_KEY: SecretStr | None = None
+    R2_ENDPOINT: HttpUrl | None = None
+    R2_BUCKET_NAME: str = "redate-cloud"
+
+    # --- SeaweedFS Storage (Local / Edge) ---
+    SEAWEED_ACCESS_KEY_ID: SecretStr | None = None
+    SEAWEED_SECRET_ACCESS_KEY: SecretStr | None = None
+    SEAWEED_ENDPOINT: HttpUrl = "http://localhost:8333"  # type: ignore[assignment]
+    SEAWEED_BUCKET_NAME: str = "redate-local"
+
+    # --- LanceDB Configuration ---
+    # Path for local vector storage (when using "local" mode)
+    LANCEDB_LOCAL_PATH: str = "./data/lancedb_store"
+    # Local cache directory for Remote S3 LanceDB (to reduce latency)
+    LANCEDB_REMOTE_CACHE_DIR: str = "/tmp/lancedb_cache"
 
     # --- LLM Selection ---
     LLM_PROVIDER: Literal["gemini", "openai"] = "gemini"
@@ -36,7 +53,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: SecretStr | None = None
     GEMINI_API_KEY_ALT: SecretStr | None = None
     GEMINI_SEARCH_ENABLED: bool = True
-    MODEL_GEMINI_CHAT: str = "gemini-2.5-flash-preview-09-2025"
+    MODEL_GEMINI_CHAT: str = "gemini-3-flash-preview"
     MODEL_GEMINI_EMBEDDING: str = "gemini-embedding-001"
 
     # --- LLM (OpenAI Compatible Mode) ---

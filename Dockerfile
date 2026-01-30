@@ -1,73 +1,67 @@
+# syntax=docker/dockerfile:1
 # ==============================================================================
-# Stage 1: Builder - 编译与依赖解析
+# Stage 1: Builder - Dependency Resolution & Compilation
 # ==============================================================================
-FROM python:3.12-slim-bookworm AS builder
+# 使用pixi官方基础镜像进行构建
+FROM ghcr.io/prefix-dev/pixi:0.63.2-bookworm-slim AS builder
 
-# 1. 环境准备
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+# 设置工作目录
+WORKDIR /app
 
-# 2. 安装 uv (高性能包管理器)
-# 使用官方镜像复制二进制文件，比 pip 安装更安全快速
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+# 1. 复制依赖描述文件 (利用 Docker Layer Cache)
+COPY pixi.toml pixi.lock pyproject.toml ./
 
-WORKDIR /build
-
-# 3. 依赖安装
-# 复制 pyproject.toml
-COPY pyproject.toml .
-# 创建虚拟环境并安装依赖
-# --no-dev: 不安装开发依赖 (ruff, pytest 等)
-# --compile: 编译字节码以加快启动速度
-ENV VIRTUAL_ENV=/build/.venv
-RUN uv venv $VIRTUAL_ENV && \
-    uv pip install -r pyproject.toml --no-cache --compile
+# 2. 安装生产环境依赖
+# -e prod: 指定安装 [environments] 中的 prod 环境
+# --locked: 严格遵循 pixi.lock 版本
+# --frozen: 不允许更新 lock 文件
+# 结果将生成在 /app/.pixi/envs/prod
+RUN pixi install -e prod --locked --frozen
 
 # ==============================================================================
-# Stage 2: Runtime - 生产环境 (Distroless 理念)
+# Stage 2: Runtime - Production Environment
 # ==============================================================================
 FROM python:3.12-slim-bookworm AS runtime
 
-# 1. 元数据与标签 (OCI Standard)
+# 元数据与标签 (OCI Standard)
 LABEL org.opencontainers.image.source="https://github.com/BUCM-Community/ReDate"
-LABEL org.opencontainers.image.description="ReDate News Automation"
+LABEL org.opencontainers.image.description="ReDate News Automation (Production)"
 
-# 2. 安全基线：创建非 Root 用户
+# 1. Security: 创建专用低权限用户
 # 使用固定 UID/GID 提高安全性
 RUN groupadd -g 10001 redate && \
     useradd -u 10001 -g redate -s /bin/false -m redate
 
-# 3. 安装运行时必需的系统库 (如需)
-# 这里的 curl 用于健康检查，gost 用于 Pod 内部可能的本地代理转发(可选)
+# 2. System: 仅安装运行时必要的系统库
+# curl 用于健康检查
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. 复制虚拟环境
-COPY --from=builder /build/.venv /app/.venv
+# 3. Artifacts: 从 Builder 阶段复制虚拟环境
+# 注意：Pixi 生成的环境是可重定位的，或者我们直接复制并修正 PATH
+COPY --from=builder /app/.pixi/envs/prod /app/.venv
 
-# 5. 复制源代码
+# 4. Source: 复制业务代码
 WORKDIR /app
-COPY src/redate/ ./redate/
+COPY src/redate ./redate
 
-# 6. 配置环境变量
+# 5. Env: 配置环境变量以使用虚拟环境
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    # 配置日志为 JSON 格式 (配合 structlog)
     LOG_FORMAT=json
 
-# 7. 权限收敛
-# 更改所有权给 redate 用户
+# 6. Permissions: 收敛权限
+# 使用 Read-Only Root FS，仅允许特定目录写入
 RUN chown -R redate:redate /app
 
-# 8. 切换用户
+# 7. Switch User
 USER redate
 
-# 9. 入口点
-# 容器默认行为，强制要求参数
-ENTRYPOINT ["python", "redate/main.py"]
+# 8. 入口点
+# 默认执行 help，具体指令由 docker-compose CMD 覆盖
+ENTRYPOINT ["python", "-m", "redate.main"]
+CMD ["--help"]

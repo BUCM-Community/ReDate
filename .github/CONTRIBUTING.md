@@ -25,7 +25,7 @@
 
 ## 提交规范 (Commit Convention)
 
-我们严格遵循 **[Conventional Commits](https://www.conventionalcommits.org/)** 规范，以便自动生成更新日志。
+我们严格遵循 **[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/#specification)** 规范，以便自动生成更新日志。
 格式：`<类型>(<范围>): <描述>`
 
 **常用类型 (Type):**
