@@ -1,6 +1,8 @@
 """
 redate/ports.py
+
 Defines abstract interfaces (Protocols) for infrastructure adapters.
+
 Focus: Dependency Inversion, Logic/Infra decoupling.
 """
 
@@ -20,7 +22,7 @@ from .domain_models import (
 if TYPE_CHECKING:
     from datetime import date
 
-__all__ = ["NewsFetcher", "StorageAdapter", "LLMEngine", "Publisher", "ImageFetcher"]
+__all__ = ["ImageFetcher", "LLMEngine", "NewsFetcher", "Publisher", "StorageAdapter"]
 
 
 @runtime_checkable
@@ -29,18 +31,26 @@ class NewsFetcher(Protocol):
 
     async def fetch_daily(
         self, target_date: date, category: str = "60s"
-    ) -> Result[DailyNewsBatch, NewsNotFoundError]: ...
+    ) -> Result[DailyNewsBatch, NewsNotFoundError]:
+        """Fetches daily news items."""
+        ...
 
-    async def download_image(self, url: str) -> bytes | None: ...
+    async def download_image(self, url: str) -> bytes | None:
+        """Downloads an image from a URL."""
+        ...
 
 
 @runtime_checkable
 class ImageFetcher(Protocol):
     """Interface for fetching stock images."""
 
-    async def fetch_random_tech_image(self) -> dict[str, str] | None: ...
+    async def fetch_random_tech_image(self) -> dict[str, str] | None:
+        """Fetches a random tech-related image metadata."""
+        ...
 
-    async def download_image(self, url: str) -> bytes | None: ...
+    async def download_image(self, url: str) -> bytes | None:
+        """Downloads the image bytes."""
+        ...
 
 
 @runtime_checkable
@@ -65,11 +75,10 @@ class StorageAdapter(Protocol):
         """Saves extracted keywords and knowledge graph triples."""
         ...
 
-    async def get_comprehensive_context(
-        self, start: date, end: date
-    ) -> RetrievalContext:
+    async def get_comprehensive_context(self, start: date, end: date) -> RetrievalContext:
         """
         Retrieves context using 'Three Ways':
+
         1. Vector Search (Semantic)
         2. Keyword Match (Topical)
         3. Knowledge Graph (Relational)
@@ -81,9 +90,13 @@ class StorageAdapter(Protocol):
 class LLMEngine(Protocol):
     """Interface for AI operations."""
 
-    async def generate_embedding(self, text: str) -> list[float]: ...
+    async def generate_embedding(self, text: str) -> list[float]:
+        """Generates vector embedding for text."""
+        ...
 
-    async def summarize_daily(self, text: str) -> str: ...
+    async def summarize_daily(self, text: str) -> str:
+        """Generates a daily summary."""
+        ...
 
     async def extract_knowledge(self, text: str) -> KnowledgeExtractionResult:
         """Extracts keywords and KG triples using structured output."""
@@ -96,7 +109,9 @@ class LLMEngine(Protocol):
         start_date: date,
         end_date: date,
         period_type: str = "Weekly",
-    ) -> WeeklyReport: ...
+    ) -> WeeklyReport:
+        """Generates a periodic report based on retrieved context."""
+        ...
 
 
 @runtime_checkable
@@ -109,8 +124,6 @@ class Publisher(Protocol):
         """Returns the publication ID (e.g., media_id) or URL."""
         ...
 
-    async def upload_permanent_material(
-        self, image_data: bytes, filename: str
-    ) -> str | None:
+    async def upload_permanent_material(self, image_data: bytes, filename: str) -> str | None:
         """Uploads a permanent image material."""
         ...

@@ -1,0 +1,77 @@
+# ops/compose/prod-cloud.yml
+# ==============================================================================
+# ReDate Cloud Deployment (Stateless / K8s-Like)
+# Context: External S3 (R2), No Local State
+# ==============================================================================
+name: redate-cloud
+
+services:
+  # ==========================================
+  # Service: Application Core (Worker)
+  # ==========================================
+  worker:
+    image: ghcr.io/bucm-community/redate:latest
+    container_name: redate-core
+    
+    # --- Security Hardening ---
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    
+    # --- Filesystem Strategy ---
+    # STRICTLY STATELESS: /app/data is ephemeral RAM for batch processing only
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+      - /app/data:rw,noexec,nosuid,size=1g
+    
+    # --- Networking ---
+    networks:
+      - redate-mesh
+    
+    # --- Configuration ---
+    # Secrets injected via Orchestrator (GitHub Actions / Cloud Run)
+    environment:
+      - APP_ENV=prod
+      - LOG_LEVEL=INFO
+      - STORAGE_PROVIDER=r2
+      # Direct internal DNS to sidecar
+      - ALL_PROXY=socks5://proxy-sidecar:1080
+      - WECHAT_PROXY_URL=socks5://proxy-sidecar:1080
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # ==========================================
+  # Service: Network Sidecar
+  # ==========================================
+  proxy-sidecar:
+    image: gogost/gost:3.2
+    container_name: redate-proxy
+    read_only: true
+    user: "65532:65532" # Non-root (Gost distroless specific)
+    security_opt:
+      - no-new-privileges:true
+    command: ["-C", "/etc/gost/config.yaml"]
+    volumes:
+      # Configuration injected at runtime via Secret Mounts
+      - type: bind
+        source: ../config/gost-client.yaml
+        target: /etc/gost/config.yaml
+        read_only: true
+    networks:
+      - redate-mesh
+    healthcheck:
+      test: ["CMD", "gost", "-V"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  redate-mesh:
+    driver: bridge

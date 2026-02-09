@@ -13,6 +13,8 @@ $RECYCLE.BIN/
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo
@@ -20,7 +22,17 @@ $RECYCLE.BIN/
 .project
 .settings/
 .classpath
-/plans
+plans/
+.roo/
+.cursorrules
+.cursor/
+.copilot/
+copilot-instructions.md
+.claude/
+.windsurf/
+.aider.*.*
+*.log-AI
+shell_gpt/
 
 # ==========================================
 # 3. 编程语言通用依赖 (Language Specific)
@@ -34,8 +46,13 @@ __pycache__/
 venv/
 ENV/
 
+# --- Node.js ---
+node_modules/
+.npm
+
 # --- Distribution / Build ---
 build/
+target/
 develop-eggs/
 dist/
 downloads/
@@ -56,8 +73,6 @@ MANIFEST
 # --- Virtual Environments ---
 # Pixi (Project Package Manager)
 .pixi/
-# 暂时不提交lock文件，待项目稳定后保留实现高可复现性
-pixi.lock
 
 # Standard/UV venvs
 .venv/
@@ -82,16 +97,20 @@ test-results/
 .dmypy.json
 dmypy.json
 
+# import-linter
+.import_linter_cache
+
 # ==========================================
 # 4. 环境变量与敏感信息 (Secrets)
 # ==========================================
 .env
 .env.local
 .env.*.local
-.env.prod
-.env.test
+!ops/config/.env.example         # 允许保留模板文件
 *.pem
 *.key
+secrets.toml
+.secrets/
 
 # ==========================================
 # 5. 数据与临时输出
@@ -102,6 +121,9 @@ logs/
 data/
 *.sqlite
 *.db
+.chroma/
+.pinecone/
+faiss_index/
 
 # MkDocs build output
 site/

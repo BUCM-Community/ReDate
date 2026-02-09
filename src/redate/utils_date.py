@@ -1,7 +1,12 @@
 """
 redate/utils_date.py
+
 Date calculation utilities.
-Focus: Pure functions, Timezone agnostic logic (operates on date objects).
+
+Focus:
+- Pure functions.
+- Timezone agnostic logic (operates on date objects).
+- Explicit Beijing Time handling for 'today'.
 """
 
 from __future__ import annotations
@@ -22,8 +27,10 @@ TZ_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 def get_beijing_today() -> date:
     """
-    获取当前的北京日期，不受服务器系统时区影响。
-    Crucial for consistent behavior across UTC (GitHub Actions) and Local envs.
+    Gets the current date in Beijing Time (UTC+8).
+
+    Crucial for consistent behavior across UTC environments (e.g., GitHub Actions)
+    and local development.
     """
     return datetime.now(TZ_SHANGHAI).date()
 
@@ -44,6 +51,7 @@ def get_previous_week_range(reference_date: date | None = None) -> tuple[date, d
     Example:
         If today is Monday 2026-01-12:
         Returns (2026-01-05, 2026-01-11)
+
     """
     if reference_date is None:
         reference_date = get_beijing_today()

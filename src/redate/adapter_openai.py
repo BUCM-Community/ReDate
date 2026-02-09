@@ -1,6 +1,8 @@
 """
 redate/adapter_openai.py
+
 OpenAI Response API implementation with Hybrid Routing.
+
 Focus:
 - Multi-Provider (OpenRouter + SiliconFlow)
 - Task-Specific Models (Gemma, DeepSeek, Mimo, BGE-M3)
@@ -26,10 +28,16 @@ __all__ = ["OpenAIAdapter"]
 
 
 class OpenAIAdapter(LLMEngine):
-    def __init__(self):
-        """
-        Initializes multiple clients for the Hybrid Scheme.
-        """
+    """
+    LLM Engine implementation using OpenAI-compatible APIs.
+
+    Supports hybrid routing:
+    - OpenRouter: For Chat, Summarization, and Reporting tasks.
+    - SiliconFlow: Optimized for Embeddings (BAAI/bge-m3).
+    """
+
+    def __init__(self) -> None:
+        """Initializes multiple clients for the Hybrid Scheme."""
         # 1. OpenRouter Client (Chat, Summaries, Reports)
         if settings.OPENROUTER_API_KEY:
             self.client_router = AsyncOpenAI(
@@ -65,8 +73,14 @@ class OpenAIAdapter(LLMEngine):
     )
     async def generate_embedding(self, text: str) -> list[float]:
         """
-        Primary: SiliconFlow (BAAI/bge-m3).
-        Secondary/Configurable: OpenRouter (Qwen).
+        Generates embeddings using the configured SiliconFlow model (default: BAAI/bge-m3).
+
+        Args:
+            text: Input text string.
+
+        Returns:
+            Embedding vector as a list of floats.
+
         """
         try:
             # Using SiliconFlow BGE-M3 as per "Default Config" requirements
@@ -86,9 +100,7 @@ class OpenAIAdapter(LLMEngine):
         before_sleep=before_sleep_log(logger, 2),
     )
     async def summarize_daily(self, text: str) -> str:
-        """
-        Uses OpenRouter: google/gemma-3-27b-it:free
-        """
+        """Uses OpenRouter: google/gemma-3-27b-it:free"""
         instructions = (
             "You are a professional news editor. Summarize the provided news items into a "
             "concise Daily Briefing. Use HTML format (<ul>, <li>, <b>). "
@@ -123,7 +135,9 @@ class OpenAIAdapter(LLMEngine):
     )
     async def extract_knowledge(self, text: str) -> KnowledgeExtractionResult:
         """
-        Uses OpenRouter (Gemma or DeepSeek) with Structured Outputs.
+        Extracts structured knowledge using OpenRouter models (Gemma/DeepSeek).
+
+        Uses `client.beta.chat.completions.parse` for strict Pydantic schema validation.
         """
         instructions = (
             "Analyze the news text. \n"
@@ -163,9 +177,10 @@ class OpenAIAdapter(LLMEngine):
         period_type: str = "Weekly",
     ) -> WeeklyReport:
         """
-        Uses OpenRouter:
-        - Weekly: tngtech/deepseek-r1t2-chimera:free
-        - Yearly: xiaomi/mimo-v2-flash:free
+        Generates periodic reports using High-Context models (DeepSeek/Mimo).
+
+        Selects the model based on the period type (Weekly vs Yearly) to balance
+        cost and context window requirements.
         """
         context_str = context.to_prompt_string()
         max_chars = 100000 if period_type == "Weekly" else 400000
@@ -201,16 +216,12 @@ class OpenAIAdapter(LLMEngine):
 
             if response.choices[0].message.parsed:
                 report = response.choices[0].message.parsed
-                return report.model_copy(
-                    update={"start_date": start_date, "end_date": end_date}
-                )
+                return report.model_copy(update={"start_date": start_date, "end_date": end_date})
 
             # Fallback if parsed is None
             raise ValueError("Structured output parsing failed")
 
         except Exception as e:
-            logger.error(
-                "openrouter_report_fail", period=period_type, model=model, error=str(e)
-            )
+            logger.error("openrouter_report_fail", period=period_type, model=model, error=str(e))
             # Critical logic failure -> Raise to alert
             raise

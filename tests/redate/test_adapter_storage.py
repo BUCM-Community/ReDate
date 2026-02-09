@@ -1,7 +1,12 @@
 """
-tests/test_adapter_storage.py
+tests/redate/test_adapter_storage.py
+
 Unit tests for HybridStorageAdapter using Moto (Stateful S3 Mock).
-Focus: Correct typing for aioboto3 context managers and stateful verification.
+
+Focus:
+- Correct typing for aioboto3 context managers.
+- Stateful verification.
+- LanceDB interaction mocking.
 """
 
 from __future__ import annotations
@@ -11,8 +16,8 @@ from datetime import date
 from typing import TYPE_CHECKING, cast
 
 import aioboto3
-import pytest
 from moto import mock_aws
+import pytest
 
 from redate.adapter_storage import HybridStorageAdapter
 from redate.domain_models import DailyNewsBatch
@@ -26,6 +31,7 @@ if TYPE_CHECKING:
 async def test_archive_raw_real_moto(mock_lancedb):
     """
     Verifies that files are actually written to the mock S3 bucket using moto.
+
     Uses strict type casting to satisfy static analysis tools.
     """
     # 1. Setup Moto Environment (Bucket must exist)
@@ -60,9 +66,7 @@ async def test_archive_raw_real_moto(mock_lancedb):
 @pytest.mark.asyncio
 @mock_aws
 async def test_lancedb_saving_logic(mock_lancedb):
-    """
-    Tests the logic flow for saving embeddings, ensuring S3 client init is valid.
-    """
+    """Tests the logic flow for saving embeddings, ensuring S3 client init is valid."""
     # Ensure bucket exists for the LanceDB S3 connection simulation
     session = aioboto3.Session()
 
@@ -87,3 +91,41 @@ async def test_lancedb_saving_logic(mock_lancedb):
     # Verify interaction with mocked LanceDB
     # _get_table_names logic: viki-60s -> viki_60s
     mock_lancedb.open_table.assert_called()
+
+
+@pytest.mark.asyncio
+@mock_aws
+async def test_get_comprehensive_context(mock_lancedb, mocker):
+    """Test context retrieval aggregating logic."""
+    session = aioboto3.Session()
+
+    def get_s3_ctx() -> AbstractAsyncContextManager[S3Client]:
+        return cast(
+            AbstractAsyncContextManager["S3Client"],
+            session.client("s3", region_name="us-east-1"),
+        )
+
+    async with get_s3_ctx() as s3:
+        await s3.create_bucket(Bucket="mock-bucket")
+
+    # Mock DB Tables
+    mock_lancedb.table_names.return_value = ["vec_test", "kw_test"]
+    mock_table = mocker.MagicMock()
+    mock_lancedb.open_table.return_value = mock_table
+
+    # Mock PyArrow conversions
+    mock_arrow = mocker.MagicMock()
+    # For vector table
+    mock_arrow.num_rows = 1
+    mock_arrow.__getitem__.return_value.to_pylist.return_value = ["Context Text"]
+    # Chain: search() -> where() -> select() -> to_arrow()
+    mock_table.search.return_value.where.return_value.select.return_value.to_arrow.return_value = (
+        mock_arrow
+    )
+    # Chain: search() -> where() -> to_arrow() (for KG)
+    mock_table.search.return_value.where.return_value.to_arrow.return_value = mock_arrow
+
+    adapter = HybridStorageAdapter()
+    context = await adapter.get_comprehensive_context(date(2026, 1, 1), date(2026, 1, 1))
+
+    assert "Context Text" in context.vector_results[0]

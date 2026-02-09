@@ -3,10 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# 通常能自动检测，这里显示指定目录，注意 Hatchling 不会自动识别大小写不一致的目录
+# 通常能自动检测，这里显式指定目录，注意 Hatchling 不会自动识别大小写不一致的目录
 packages = ["src/redate"]
 
 [project]
 name = "redate"
-version = "0.2.0"
+version = "0.3.0"
 # 注意：依赖管理已移交给 pixi.toml，本文件仅为了可编辑安装存在。

@@ -2,7 +2,62 @@
 
 ReDate 采用 **六边形架构 (Hexagonal Architecture)**，也称为 **端口与适配器架构 (Ports and Adapterers)**。这种设计模式确保了业务逻辑的核心地位，使其不依赖于任何外部框架或基础设施。
 
-## 1. 逻辑分层
+## 1. 目录结构 (Physical Directory)
+```text
+redate/
+├── .github/                # Minimal GHA just to bootstrap Dagger
+├── .pixi/                  # Managed environments
+├── ci/
+│   ├── __init__.py         # if needed
+│   └── main.py             # Dagger CI Pipeline (test + image build & push + docs deploy + business)
+├── docs/                   # 存放dev文档
+│   ├── reference/          # 存放具体的API文档
+│   ├── index.md            # DOCS INDEX
+│   └── architecture.md     # 项目架构和设计模式
+├── ops/                    # OPERATIONS DOMAIN
+│   ├── compose/
+│   │   ├── prod-sovereign.yml  # 本地部署容器编排
+│   │   └── prod-cloud.yml      # 云端部署容器编排
+│   ├── config/
+│   │   ├── .env.example        # Environment variable template
+│   │   ├── gost-client.yaml    # Proxy configuration
+│   │   ├── importlinter.ini    # Architecture guardrails
+│   │   ├── mypy.toml           # Typecheck rules
+│   │   └── ruff.toml           # Linter rules
+│   └── container/
+│       ├── Dockerfile          # Production Image (Pixi-based)
+│       └── entrypoint.sh       # Init script (if needed)
+├── scripts/
+│   ├── bootstrap_linux.sh    # dev quickstart
+│   └── sync_meta.py          # generate pyproject.toml (if needed)
+├── src/
+│   └── redate/             # SOURCE DOMAIN
+│       ├── __init__.py
+│       ├── main.py           # Composition Root (Entry Point)
+│       ├── config.py         # Infrastructure (Configuration)
+│       ├── domain_models.py  # Domain (Pydantic Models)
+│       ├── ports.py          # Domain (Interfaces/Protocols)
+│       ├── service_news.py   # Application (Orchestration)
+│       ├── service_migration.py
+│       ├── adapter_viki.py   # Infrastructure
+│       ├── adapter_image.py
+│       ├── adapter_gemini.py
+│       ├── adapter_openai.py
+│       ├── adapter_storage.py
+│       ├── adapter_wechat.py
+│       ├── utils_date.py
+│       └── utils_telemetry.py
+├── tests/                  # Pytest suite
+├── .gitignore
+├── LICENSE
+├── README.md
+├── mkdocs.yml
+├── pixi.lock               # The Holy Grail of Truth
+├── pixi.toml
+└── pyproject.toml
+```
+
+## 2. 逻辑分层 (Logical Constraint)
 
 项目的物理结构与逻辑层次严格对应，从内到外依次为：
 
@@ -34,7 +89,7 @@ ReDate 采用 **六边形架构 (Hexagonal Architecture)**，也称为 **端口�
 - **特性**:
     - `GeminiAdapterer`: 集成 Google Gemini API。
     - `OpenAIAdapterer`: 集成 OpenAI API。未来考虑集成 OpenResponse API
-    - `HybridStorageAdapterer`: 同时管理 R2 对象存储与 LanceDB 向量数据库。
+    - `HybridStorageAdapterer`: 同时管理 R2/SeaweedFS 对象存储与 LanceDB 向量数据库。
     - `VikiNewsAdapterer`: 从viki API拉取不同类别的信息。
     - `HybridImageAdapterer`: 从多个可免费商用图片来源以关键词限制方式拉取图片。
     - `WeChatAdapterer`: 处理微信 API 的复杂认证与推送逻辑。
@@ -43,26 +98,28 @@ ReDate 采用 **六边形架构 (Hexagonal Architecture)**，也称为 **端口�
 
 ---
 
-## 2. 关键设计模式
+## 3. 关键设计模式
 
 ### 依赖反转 (Dependency Inversion)
 高层模块（`NewsService`）不应依赖低层模块（`GeminiAdapterer`），两者都应依赖于抽象（`LLMEngine` 协议）。这种设计使得我们可以在测试时轻松注入 Mock 对象，或者在未来更换 AI 引擎。
 
 ### Result 模式 (Monadic Error Handling)
-受 Rust 和函数式编程启发，我们在 `redate/domain_models.py` 中实现了 `Result[T, E]` 类型。
+受 Rust 和函数式编程启发，我们在 `redate/domain_models.py` 中实现了 `Result[T, E]` 类型。  
+
 - 相比于抛出异常，显式的 `Ok` 和 `Err` 返回值强制调用者处理错误分支。
 - 这极大提高了系统的稳健性，尤其是在处理网络不稳定的外部 API 时。
 
 ### 幂等性保障 (Idempotency)
-为了防止重复抓取或发布：
+为了防止重复抓取或发布：  
+
 1. **内容指纹**: 使用内容的 SHA-256 哈希值作为唯一标识。
 2. **状态检查**: 在执行写操作前，先通过 `StorageAdapterer.check_exists` 校验是否已存在。
 
 ---
 
-## 3. 部署架构 (Security Model)
+## 4. 部署架构 (Deployment Model)
 
-本项目采用容器编排和固定IP代理跳板来解决安全性与网络限制问题。
+本项目采用容器编排和固定IP代理跳板来解决安全性与网络限制问题。  
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": { "primaryColor": "#E3F2FD", "edgeLabelBackground":"#ffffff", "tertiaryColor": "#F5F5F5"}}}%%
@@ -76,7 +133,7 @@ graph TD
     classDef security fill:#ffebee,stroke:#c62828,stroke-width:2px;
 
     %% --- 1. 本地容器环境 ---
-    subgraph Docker_Env ["Local Docker Compose"]
+    subgraph Docker_Env ["Cloud Docker Compose"]
         style Docker_Env fill:#fbfbfb,stroke:#ddd,stroke-width:2px,rx:10
         
         %% 核心业务容器
@@ -117,7 +174,7 @@ graph TD
         
         Gemini["Google Gemini API"]
         OpenAI["OpenAI Compatible API"]
-        WebSources["News Websites"]
+        WebSources["News Source API"]
         R2_Bucket[("Cloudflare R2")]
         
         class Gemini,OpenAI,WebSources external
@@ -151,8 +208,8 @@ graph TD
     
     %% 存储连接 (Link Index: 10, 11, 12)
     Store_Adaper === LanceDB
-    Store_Adaper -.->|"Condition: Local"| SeaweedFS
-    Store_Adaper -.->|"Condition: Remote"| R2_Bucket
+    Store_Adaper -.->|"Condition: Local/Sovereign"| SeaweedFS
+    Store_Adaper -.->|"Condition: Remote/Cloud"| R2_Bucket
 
     %% 代理隧道 (关键路径高亮) (Link Index: 13)
     Gost_Client ==>|"🔒 Encrypted Tunnel (QUIC/WSS)"| Gost_Server
@@ -171,8 +228,8 @@ graph TD
 
 ---
 
-## 4. 数据流生命周期
+## 5. 数据流生命周期 (Data Lifecycle)
 
-1.  **Ingestion**: 抓取原始数据 -> 校验指纹 -> 清洗并保存至 R2 (归档) -> 存入 LanceDB (向量化)。
+1.  **Ingestion**: 抓取原始数据 -> 校验Hash值 -> 清洗并保存至 R2/SeaweedFS对象存储 (归档) -> 存入 LanceDB (向量化)。
 2.  **Synthesis**: 查询 LanceDB 历史上下文 -> LLM 生成报告 -> 下载配套配图。
 3.  **Publication**: 适配 HTML 模版 -> 上传素材至微信 -> 创建草稿。

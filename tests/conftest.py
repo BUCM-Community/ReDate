@@ -1,23 +1,30 @@
 """
 tests/conftest.py
+
 Global fixtures for ReDate test suite.
-Focus: Environment isolation, AsyncIO configuration, and Dependency Mocking.
+
+Focus:
+- Environment isolation.
+- AsyncIO configuration.
+- Dependency Mocking.
 """
 
 import os
+from pathlib import Path
 import sys
 from unittest.mock import AsyncMock
 
 import pytest
 
 # Ensure the project root is in sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
 
 
 @pytest.fixture(scope="session", autouse=True)
 def set_env():
     """
     Sets environment variables for the entire test session before any imports.
+
     This ensures Pydantic Settings can initialize without errors.
     """
     old_environ = dict(os.environ)
@@ -50,9 +57,7 @@ def set_env():
 
 @pytest.fixture
 def mock_sleep(mocker):
-    """
-    Skip asyncio.sleep to speed up tests involving retries.
-    """
+    """Skip asyncio.sleep to speed up tests involving retries."""
     return mocker.patch("asyncio.sleep", new_callable=AsyncMock)
 
 
@@ -60,6 +65,7 @@ def mock_sleep(mocker):
 def mock_lancedb(mocker):
     """
     Global mock for LanceDB to prevent local DB file creation during unit tests.
+
     Individual tests can override return values.
     """
     mock_module = mocker.patch("redate.adapter_storage.lancedb")

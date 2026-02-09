@@ -1,11 +1,15 @@
 """
-tests/test_config.py
+tests/redate/test_config.py
+
 Unit tests for Configuration Management.
-Focus: Pydantic Settings validation and Environment Variable loading.
+
+Focus:
+- Pydantic Settings validation.
+- Environment Variable loading.
 """
 
-import pytest
 from pydantic import SecretStr, ValidationError
+import pytest
 
 from redate.config import Settings
 

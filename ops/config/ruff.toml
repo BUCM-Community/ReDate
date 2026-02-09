@@ -1,0 +1,65 @@
+# ops/config/ruff.toml
+# =========================================================
+# Modern Python Linting Configuration
+# Target: Python 3.12+
+# =========================================================
+
+# 1. Core Settings
+preview = true
+target-version = "py312"
+line-length = 100
+indent-width = 4
+src = ["src", "scripts", "tests"]
+
+# 2. Rule Selection
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "D",    # pydocstyle
+    "F",    # Pyflakes
+    "I",    # isort (Import sorting)
+    "N",    # pep8-naming
+    "UP",   # pyupgrade (Upgrade syntax to 3.12)
+    "B",        # flake8-bugbear (Likely bugs)
+    "A",        # flake8-builtins (Avoid shadowing builtins)
+    "S",        # flake8-bandit
+    "C4",       # flake8-comprehensions
+    "SIM",      # flake8-simplify
+    "ARG",      # flake8-unused-arguments
+    "PTH",      # flake8-use-pathlib (Modern file handling)
+    "ASYNC",    # flake8-async
+    "T20",      # flake8-print (logging rather than print)
+    "C90",  # Cyclomatic Complexity
+    "RUF",  # Ruff-specific rules
+    "PLW1514", # Preview: {function_name} in text mode without explicit encoding argument
+    "PLW3201", # Preview: Dunder method {name} has no special meaning in Python 3
+]
+
+ignore = [
+    "E501", # Line too long (handled by formatter mostly, strict enforcement annoying)
+    "D107", # Missing docstring in `__init__`
+    "D203", # 1 blank line required before class docstring, keep D211 (No blank lines allowed before class docstring)
+    "D212", # Multi-line docstring summary should start at the first line, keep D213 (Multi-line docstring summary should start at the second line)
+    "D401", # First line should be in imperative mood
+    "D400", # First line should end with a period
+    "D415", # First line should end with a period, question mark, or exclamation point
+]
+
+# 3. Import Sorting Strategy
+[lint.isort]
+known-first-party = ["redate"]
+force-sort-within-sections = true
+combine-as-imports = true
+
+# 4. Formatting (Black Compatible)
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+# 5. File Specific Overrides
+[lint.per-file-ignores]
+"__init__.py" = ["F401"] # Allow unused imports in __init__
+"tests/*" = ["ARG", "S"] # Allow unused args (fixtures) and security laxity in tests

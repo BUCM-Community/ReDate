@@ -1,7 +1,12 @@
 """
 redate/service_news.py
+
 Orchestrates the data pipeline (Fetch -> Store -> Analyze -> Publish).
-Focus: Idempotency, Logic Flow, Error handling via Result.
+
+Focus:
+- Idempotency via Hashing.
+- Logical Flow Control.
+- Error handling via Result Monad.
 """
 
 from __future__ import annotations
@@ -26,6 +31,12 @@ __all__ = ["NewsService"]
 
 
 class NewsService:
+    """
+    Core Domain Service for News Processing.
+
+    Coordinates the interaction between Fetchers, Storage, LLM, and Publishers.
+    """
+
     def __init__(
         self,
         fetcher: NewsFetcher,
@@ -33,7 +44,7 @@ class NewsService:
         llm: LLMEngine,
         publisher: Publisher,
         image_fetcher: ImageFetcher | None = None,
-    ):
+    ) -> None:
         self.fetcher = fetcher
         self.storage = storage
         self.llm = llm
@@ -41,14 +52,21 @@ class NewsService:
         self.image_fetcher = image_fetcher
         self.today = get_beijing_today()
 
-    async def run_daily_workflow(self, target_date: date, category: str = "60s"):
+    async def run_daily_workflow(self, target_date: date, category: str = "60s") -> None:
         """
-        Executes the Daily News Pipeline.
-        1. Fetch News
-        2. Check Idempotency (Hash)
-        3. Archive Raw
-        4. Analyze (Extract Keywords & Knowledge Graph)
-        5. Vectorize & Save All
+        Executes the Daily News Ingestion Pipeline.
+
+        Steps:
+        1. Fetch News from the configured source.
+        2. Check Idempotency (Skip if hash exists in DB).
+        3. Archive Raw JSON to Object Storage.
+        4. Analyze text (Embedding + Knowledge Extraction).
+        5. Save Vectors and Metadata to LanceDB.
+
+        Args:
+            target_date: The date to fetch news for.
+            category: The news category (e.g., '60s', 'ai-news').
+
         """
         logger.info("daily_job_start", date=str(target_date), category=category)
 
@@ -100,10 +118,12 @@ class NewsService:
             # If AI fails, we re-throw because our data is incomplete for RAG
             raise
 
-    async def run_weekly_workflow(self):
+    async def run_weekly_workflow(self) -> None:
         """
-        Summarizes the previous week (Monday to Sunday).
-        Uses 'Three Ways' retrieval context.
+        Executes the Weekly Summary Pipeline.
+
+        Summarizes the previous week (Monday to Sunday) using the 'Three Ways'
+        retrieval context.
         """
         start_date, end_date = get_previous_week_range(self.today)
         logger.info(
@@ -114,14 +134,20 @@ class NewsService:
         )
         await self._run_period_report(start_date, end_date, "Weekly")
 
-    async def run_yearly_workflow(self):
+    async def run_yearly_workflow(self) -> None:
         """
-        Yearly Job: Summarize last year -> Push.
+        Shared internal logic for generating and publishing periodic reports.
+
+        Args:
+            start: Start date of the period.
+            end: End date of the period.
+            period_type: Label for the report (e.g., "Weekly", "Yearly").
+
         """
         start_date, end_date = get_previous_year_range(self.today)
         await self._run_period_report(start_date, end_date, "Yearly")
 
-    async def _run_period_report(self, start: date, end: date, period_type: str):
+    async def _run_period_report(self, start: date, end: date, period_type: str) -> None:
         """Shared logic for periodic reporting using Hybrid Context."""
         logger.info(
             f"{period_type.lower()}_job_start",
@@ -135,10 +161,7 @@ class NewsService:
         retrieval_context = await self.storage.get_comprehensive_context(start, end)
 
         # Check if we have *any* data
-        if (
-            not retrieval_context.vector_results
-            and not retrieval_context.knowledge_graph_summary
-        ):
+        if not retrieval_context.vector_results and not retrieval_context.knowledge_graph_summary:
             logger.warning(f"no_data_for_{period_type.lower()}_report")
             return
 
@@ -169,9 +192,10 @@ class NewsService:
         except Exception as e:
             logger.error("publish_failed", error=str(e))
 
-    async def upload_weekly_images(self, count: int = 5):
+    async def upload_weekly_images(self, count: int = 5) -> None:
         """
         Weekly Job: Fetch images from Unsplash and upload to WeChat.
+
         Naming: YYMMDD_{name}
         """
         if not self.image_fetcher:

@@ -1,27 +1,67 @@
 """
 redate/adapter_wechat.py
+
 WeChat API Client.
+
 Focus: Sidecar Proxy via env vars, async I/O, Token Management.
 """
 
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
+import time
+from typing import TYPE_CHECKING
 
 import aiohttp
 from aiohttp import ClientTimeout, FormData
+from pydantic import BaseModel
 
 from .config import settings
 from .ports import Publisher
 from .utils_telemetry import logger
 
+if TYPE_CHECKING:
+    from types import TracebackType
+
 __all__ = ["WeChatAdapter"]
 
 
+class TokenCache(BaseModel):
+    """Schema for the locally cached access token."""
+
+    token: str
+    expires_at: float
+
+
 class WeChatAdapter(Publisher):
-    def __init__(self):
+    """
+    WeChat Official Account Publisher Adapter.
+
+    Handles token lifecycle management and content publishing.
+    Relies on an external proxy sidecar for network access.
+
+    Logic:
+    ```mermaid
+    graph TD
+        A[Publish] --> B[Get Token]
+        B --> C{Cache Valid?}
+        C -->|Yes| D[Return Token]
+        C -->|No| E[Fetch API]
+        E --> F[Update Cache]
+        F --> D
+        D --> G[Upload Media]
+        G --> H[Create Draft]
+    ```
+    """
+
+    def __init__(self) -> None:
+        """
+        Initializes the WeChat adapter.
+
+        Configures the client session to trust environment variables (for proxy support)
+        and sets up the local token cache path.
+        """
         # Decouple ClientSession and Proxy via sidecar container.
         self.aclient = aiohttp.ClientSession(
             timeout=ClientTimeout(total=45.0),
@@ -36,10 +76,11 @@ class WeChatAdapter(Publisher):
         # 1. Check Cache
         if self.token_cache_path.exists():
             try:
-                data = json.loads(self.token_cache_path.read_text())
+                # Use Pydantic to strictly parse and type-check the JSON content
+                cache = TokenCache.model_validate_json(self.token_cache_path.read_text())
                 # Buffer of 5 minutes
-                if data.get("expires_at", 0) > time.time() + 300:
-                    return data["token"]
+                if cache.expires_at > time.time() + 300:
+                    return cache.token
             except Exception:
                 logger.warning("token_cache_corrupt")
 
@@ -80,6 +121,18 @@ class WeChatAdapter(Publisher):
     async def publish_article(
         self, title: str, html_content: str, cover_image: bytes | None
     ) -> str:
+        """
+        Publishes an article to WeChat Drafts.
+
+        Args:
+            title: Article Title.
+            html_content: HTML Body.
+            cover_image: Optional cover image bytes.
+
+        Returns:
+            The Media ID of the created draft.
+
+        """
         token = await self._get_token()
 
         # 1. Upload Cover (if exists)
@@ -89,9 +142,7 @@ class WeChatAdapter(Publisher):
 
             # Prepare Multipart/Form-Data using standard aiohttp
             data = FormData()
-            data.add_field(
-                "media", cover_image, filename="cover.png", content_type="image/png"
-            )
+            data.add_field("media", cover_image, filename="cover.png", content_type="image/png")
 
             try:
                 async with self.aclient.post(
@@ -142,17 +193,23 @@ class WeChatAdapter(Publisher):
 
             return draft_res["media_id"]
 
-    async def upload_permanent_material(
-        self, image_data: bytes, filename: str
-    ) -> str | None:
-        """Uploads a permanent image material to WeChat."""
+    async def upload_permanent_material(self, image_data: bytes, filename: str) -> str | None:
+        """
+        Uploads a permanent image material to WeChat.
+
+        Args:
+            image_data: Raw bytes of the image.
+            filename: Name of the file (e.g., image.jpg).
+
+        Returns:
+            Media ID if successful, None otherwise.
+
+        """
         token = await self._get_token()
         url = "https://api.weixin.qq.com/cgi-bin/material/add_material"
 
         data = FormData()
-        data.add_field(
-            "media", image_data, filename=filename, content_type="image/jpeg"
-        )
+        data.add_field("media", image_data, filename=filename, content_type="image/jpeg")
 
         try:
             async with self.aclient.post(
@@ -161,9 +218,7 @@ class WeChatAdapter(Publisher):
                 resp.raise_for_status()
                 res_data = await resp.json()
                 if "media_id" in res_data:
-                    logger.info(
-                        "permanent_material_uploaded", media_id=res_data["media_id"]
-                    )
+                    logger.info("permanent_material_uploaded", media_id=res_data["media_id"])
                     return res_data["media_id"]
                 else:
                     logger.warning("permanent_upload_fail", resp=res_data)
@@ -171,12 +226,19 @@ class WeChatAdapter(Publisher):
             logger.error("permanent_upload_error", error=str(e))
         return None
 
-    async def close(self):
+    async def close(self) -> None:
         """Resource cleanup."""
         await self.aclient.close()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> WeChatAdapter:
+        """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Async context manager exit."""
         await self.close()

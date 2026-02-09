@@ -1,14 +1,19 @@
 """
-tests/test_domain_models.py
+tests/redate/test_domain_models.py
+
 Unit tests for Core Domain Logic.
-Focus: Immutability, Hashing, Result Monad behavior.
+
+Focus:
+- Immutability.
+- Hashing.
+- Result Monad behavior.
 """
 
 from datetime import date
 from typing import cast
 
-import pytest
 from pydantic import HttpUrl, ValidationError
+import pytest
 
 from redate.domain_models import (
     Err,
@@ -32,15 +37,9 @@ def test_news_item_immutability():
 
 def test_news_item_fingerprint_deterministic():
     """Ensure fingerprint is stable based on content and URL."""
-    item1 = NewsItem(
-        content="A", url=cast(HttpUrl, "https://a.com"), published_at=date.today()
-    )
-    item2 = NewsItem(
-        content="A", url=cast(HttpUrl, "https://a.com"), published_at=date.today()
-    )
-    item3 = NewsItem(
-        content="B", url=cast(HttpUrl, "https://a.com"), published_at=date.today()
-    )
+    item1 = NewsItem(content="A", url=cast(HttpUrl, "https://a.com"), published_at=date.today())
+    item2 = NewsItem(content="A", url=cast(HttpUrl, "https://a.com"), published_at=date.today())
+    item3 = NewsItem(content="B", url=cast(HttpUrl, "https://a.com"), published_at=date.today())
 
     assert item1.fingerprint == item2.fingerprint
     assert item1.fingerprint != item3.fingerprint

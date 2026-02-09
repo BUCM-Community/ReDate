@@ -1,7 +1,12 @@
 """
-tests/test_adapter_viki.py
+tests/redate/test_adapter_viki.py
+
 Unit tests for VikiNewsAdapter.
-Focus: Resilience, parsing logic, and correct handling of 404s.
+
+Focus:
+- Resilience.
+- Parsing logic.
+- Correct handling of 404s.
 """
 
 from datetime import date
@@ -15,9 +20,7 @@ from redate.domain_models import Err, NewsNotFoundError, Ok
 
 @pytest.mark.asyncio
 async def test_fetch_daily_success_parsing(mocker):
-    """
-    Test parsing of Viki HTML content.
-    """
+    """Test parsing of Viki HTML content."""
     # Mock Data with HTML
     mock_json = {
         "data": [
@@ -52,9 +55,7 @@ async def test_fetch_daily_success_parsing(mocker):
 
 @pytest.mark.asyncio
 async def test_fetch_daily_404_handled_as_result(mocker):
-    """
-    Ensure 404 returns an Err result object, not raising an exception.
-    """
+    """Ensure 404 returns an Err result object, not raising an exception."""
     mock_response = AsyncMock()
     mock_response.status = 404
 
@@ -72,9 +73,7 @@ async def test_fetch_daily_404_handled_as_result(mocker):
 
 @pytest.mark.asyncio
 async def test_fetch_daily_retry_on_500(mocker, mock_sleep):
-    """
-    Ensure tenacity retry logic is triggered on server errors.
-    """
+    """Ensure tenacity retry logic is triggered on server errors."""
     # 1. Setup Mock to fail twice then succeed
     mock_fail = AsyncMock()
     mock_fail.status = 500

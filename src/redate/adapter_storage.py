@@ -1,18 +1,21 @@
 """
 redate/adapter_storage.py
+
 Handles Object Storage (aioboto3) and Vector Database (lancedb).
+
 Focus:
 - Dynamic Backend Switching by Unified S3 Protocol Interface (R2 vs SeaweedFS).
 - LanceDB S3 Integration with Caching & Compaction.
-- Uses PyArrow for zero-copy data access
+- Uses PyArrow for zero-copy data access.
 - Pure Async I/O.
 """
 
 from __future__ import annotations
 
-import re
+import asyncio
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING, cast
 
 import aioboto3
@@ -28,6 +31,7 @@ from .utils_date import get_beijing_today
 from .utils_telemetry import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from datetime import date
 
     from types_aiobotocore_s3 import S3Client
@@ -38,10 +42,31 @@ __all__ = ["HybridStorageAdapter"]
 
 
 class HybridStorageAdapter(StorageAdapter):
-    def __init__(self, mode: str | None = None):
+    """
+    Unified Storage Adapter for Object Storage and Vector Database.
+
+    Supports two deployment modes:
+    1. 'remote': Cloudflare R2 + LanceDB via S3.
+    2. 'local': SeaweedFS + LanceDB via local disk.
+
+    Logic Flow:
+    ```mermaid
+    graph TD
+        A[Client] -->|Save| B{Mode?}
+        B -->|Remote| C[R2 Bucket]
+        B -->|Local| D[SeaweedFS]
+        C --> E[LanceDB S3]
+        D --> F[LanceDB Local]
+    ```
+    """
+
+    def __init__(self, mode: str | None = None) -> None:
         """
+        Initialize the storage adapter.
+
         Args:
-            mode: "remote" (R2) or "local" (SeaweedFS). Defaults to settings.DEPLOY_MODE.
+            mode: Deployment mode ('remote' or 'local'). Defaults to settings.DEPLOY_MODE.
+
         """
         self.session = aioboto3.Session()
         self.mode = mode or settings.DEPLOY_MODE
@@ -109,19 +134,18 @@ class HybridStorageAdapter(StorageAdapter):
         # Connect to LanceDB
         # storage_options is only valid for remote URIs
         if self.lancedb_options:
-            self.db = lancedb.connect(
-                self.lancedb_uri, storage_options=self.lancedb_options
-            )
+            self.db = lancedb.connect(self.lancedb_uri, storage_options=self.lancedb_options)
         else:
             self.db = lancedb.connect(self.lancedb_uri)
 
     # --- Helper: 动态表名生成 ---
     def _get_table_names(self, source: str) -> dict[str, str]:
         """
-        根据 source 生成符合 LanceDB/Parquet 命名规范的表名。
-        Returns dictionary of table names for different data types.
+        Generates standardized table names based on the data source.
+
+        Ensures names are safe for SQL/Filesystem usage.
         """
-        # 将非字母数字字符替换为下划线，防止 SQL/File System 错误
+        # 将非字母数字字符替换为下划线, 防止 SQL/File System 错误
         safe_suffix = re.sub(r"[^a-zA-Z0-9]", "_", source).lower()
         return {
             "meta": f"meta_{safe_suffix}",
@@ -131,10 +155,11 @@ class HybridStorageAdapter(StorageAdapter):
         }
 
     # --- Helper: 强类型 S3 Context ---
-    def _s3_client(self) -> AbstractAsyncContextManager["S3Client"]:
+    def _s3_client(self) -> AbstractAsyncContextManager[S3Client]:
         """
         Creates a properly typed S3 client context manager.
-        显式转换类型，解决 'Attribute __aenter__ is unknown' 报错。
+
+        显式转换类型, 解决 'Attribute __aenter__ is unknown' 报错。
         """
         ctx = self.session.client(
             "s3",
@@ -146,7 +171,7 @@ class HybridStorageAdapter(StorageAdapter):
         # 强制转换为标准异步上下文管理器接口
         return cast(AbstractAsyncContextManager["S3Client"], ctx)
 
-    async def _ensure_bucket_exists(self):
+    async def _ensure_bucket_exists(self) -> None:
         """Idempotent check to ensure bucket exists (useful for local setup)."""
         try:
             async with self._s3_client() as s3:
@@ -161,7 +186,15 @@ class HybridStorageAdapter(StorageAdapter):
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     async def archive_raw(self, filename: str, data: bytes) -> bool:
         """
-        Uploads raw object to S3 (R2 or SeaweedFS).
+        Uploads raw object (JSON/Bytes) to S3-compatible storage (R2 or SeaweedFS).
+
+        Args:
+            filename: Target key/path in the bucket.
+            data: Raw bytes to upload.
+
+        Returns:
+            True if upload succeeded, False otherwise.
+
         """
         if self.mode == "local":
             await self._ensure_bucket_exists()
@@ -182,7 +215,9 @@ class HybridStorageAdapter(StorageAdapter):
 
     async def check_exists(self, content_hash: str, source: str) -> bool:
         """
-        Check if data exists in some table using PyArrow.
+        Checks if a data item already exists in the LanceDB metadata table.
+
+        Used for idempotency control to prevent reprocessing the same news batch.
         """
         tables = self._get_table_names(source)
         table_name = tables["meta"]
@@ -193,9 +228,7 @@ class HybridStorageAdapter(StorageAdapter):
         try:
             tbl = self.db.open_table(table_name)
             # Limit 1 + Arrow Table check (metadata only scan usually)
-            arrow_tbl = (
-                tbl.search().where(f"hash = '{content_hash}'").limit(1).to_arrow()
-            )
+            arrow_tbl = tbl.search().where(f"hash = '{content_hash}'").limit(1).to_arrow()
             return arrow_tbl.num_rows > 0
         except Exception as e:
             logger.warning("lancedb_check_fail", error=str(e))
@@ -203,8 +236,9 @@ class HybridStorageAdapter(StorageAdapter):
 
     async def save_embedding(self, batch: DailyNewsBatch, vector: list[float]) -> None:
         """
-        Saves vector and metadata to LanceDB.
-        Triggers compaction periodically for R2 optimization.
+        Saves the vector embedding and associated metadata to LanceDB.
+
+        In 'remote' mode, also triggers table compaction to optimize S3 performance.
         """
         tables = self._get_table_names(batch.source)
         meta_table_name = tables["meta"]
@@ -250,13 +284,18 @@ class HybridStorageAdapter(StorageAdapter):
     async def optimize_table(self, table_name: str) -> None:
         """
         Runs compaction on the table. Crucial for R2/S3 performance.
+
+        compact_files() merges small fragments,
+        cleanup_old_versions() removes stale files (good for costs)
         """
-        try:
+
+        def _optimize() -> None:
             tbl = self.db.open_table(table_name)
-            # compact_files() merges small fragments
             tbl.compact_files()
-            # cleanup_old_versions() removes stale files (good for costs)
             tbl.cleanup_old_versions()
+
+        try:
+            await asyncio.to_thread(_optimize)
             logger.info("table_optimized", table=table_name)
         except Exception as e:
             logger.warning("optimization_failed", table=table_name, error=str(e))
@@ -265,7 +304,9 @@ class HybridStorageAdapter(StorageAdapter):
         self, batch: DailyNewsBatch, knowledge: KnowledgeExtractionResult
     ) -> None:
         """
-        保存提取的 Knowledge Graph 和 Keywords 到对应的表中。
+        Saves extracted Knowledge Graph triples and Keywords to respective tables.
+
+        Uses PyArrow tables for efficient, columnar data insertion.
         """
         tables = self._get_table_names(batch.source)
         kw_table = tables["kw"]
@@ -317,14 +358,14 @@ class HybridStorageAdapter(StorageAdapter):
     def _write_to_table(self, table_name: str, data: list[dict] | pa.Table) -> None:
         """
         Helper to create or append to a LanceDB table.
+
         Supports both list of dicts and PyArrow Tables.
         Explicit type checking prevents static analysis errors.
         """
         # 1. Check for Empty List
-        if isinstance(data, list) and not data:
-            return
-        # 2. Check for Empty Arrow Table
-        elif isinstance(data, pa.Table) and data.num_rows == 0:  # type: ignore[reportAttributeAccessIssue]
+        if (isinstance(data, list) and not data) or (
+            isinstance(data, pa.Table) and data.num_rows == 0
+        ):
             return
 
         if table_name not in self.db.table_names():
@@ -332,85 +373,109 @@ class HybridStorageAdapter(StorageAdapter):
         else:
             self.db.open_table(table_name).add(data)
 
-    async def get_comprehensive_context(
-        self, start: date, end: date
-    ) -> RetrievalContext:
+    async def get_comprehensive_context(self, start: date, end: date) -> RetrievalContext:
         """
-        Retrieves context from Vector, Keywords and Knowledge Graph via PyArrow.
+        Retrieves retrieval context using the 'Three Ways' methodology.
+
+        Aggregates data from:
+        1. Vectors (Detailed Content).
+        2. Keywords (Topical frequencies).
+        3. Knowledge Graph (Relationships).
+
+        Implementation uses PyArrow for zero-copy data access to minimize memory overhead.
         """
-        all_tables = self.db.table_names()
-        vec_tables = [t for t in all_tables if t.startswith("vec_")]
-        kw_tables = [t for t in all_tables if t.startswith("kw_")]
-        kg_tables = [t for t in all_tables if t.startswith("kg_")]
-
-        vector_results: list[str] = []
-        kg_sentences: list[str] = []
-        all_keywords_chunks: list[pa.Array] = []
-
         date_filter = f"date >= '{start}' AND date <= '{end}'"
+        all_tables = self.db.table_names()
 
-        # --- A. Vector Context (Detailed Content) ---
-        for t_name in vec_tables:
-            try:
-                tbl = self.db.open_table(t_name)
-                # Fetch only 'text' column, convert to python list
-                # This avoids loading vectors/embeddings into memory
-                arrow_tbl = tbl.search().where(date_filter).select(["text"]).to_arrow()
-
-                if arrow_tbl.num_rows > 0:
-                    source_label = t_name.replace("vec_", "").replace("_", " ").upper()
-                    # PyArrow Column -> Python List
-                    texts = arrow_tbl["text"].to_pylist()
-                    vector_results.extend([f"[{source_label}] {t}" for t in texts])
-            except Exception:
-                pass
-
-        # --- B. Keyword Context (Topics) ---
-        for t_name in kw_tables:
-            try:
-                tbl = self.db.open_table(t_name)
-                arrow_tbl = (
-                    tbl.search().where(date_filter).select(["keyword"]).to_arrow()
-                )
-                if arrow_tbl.num_rows > 0:
-                    # Append the specific column ChunkedArray
-                    all_keywords_chunks.append(arrow_tbl["keyword"])
-            except Exception as e:
-                logger.warning("ctx_fetch_kw_fail", table=t_name, error=str(e))
-
-        # --- C. Knowledge Graph Context (Relationships) ---
-        for t_name in kg_tables:
-            try:
-                tbl = self.db.open_table(t_name)
-                # Need multiple columns for reconstruction
-                arrow_tbl = tbl.search().where(date_filter).to_arrow()
-                if arrow_tbl.num_rows > 0:
-                    # Convert whole table to list of dicts for row-wise iteration
-                    # (Faster than iterating Arrow scalars in Python loop)
-                    rows = arrow_tbl.to_pylist()
-                    # Format: 2026-01-21 [Wiki]: Google --released--> Gemini 2.0
-                    for row in rows:
-                        line = (
-                            f"{row['date']} [{row['source']}]: "
-                            f"{row['subject']} --{row['predicate']}--> {row['object']}"
-                        )
-                        kg_sentences.append(line)
-            except Exception as e:
-                logger.warning("ctx_fetch_kg_fail", table=t_name, error=str(e))
+        # Split processing to reduce complexity
+        vector_results = await self._fetch_vector_context(all_tables, date_filter)
+        all_keywords_chunks = await self._fetch_keyword_chunks(all_tables, date_filter)
+        kg_sentences = await self._fetch_kg_sentences(all_tables, date_filter)
 
         # Aggregate and rank keywords
-
-        # Zero-copy concatenation of chunks
-        combined_array = pa.chunked_array(all_keywords_chunks)
-        counts = combined_array.value_counts
-        # 排序并取前30 (PyArrow Table 操作)
-        top_k = counts.sort_by([("counts", "descending")]).slice(0, 30)
-        top_keywords = [
-            f"{row['values']} ({row['counts']})" for row in top_k.to_pylist()
-        ]
+        top_keywords = []
+        if all_keywords_chunks:
+            # Zero-copy concatenation of chunks
+            combined_array = pa.chunked_array(all_keywords_chunks)
+            counts = combined_array.value_counts
+            # 排序并取前30 (PyArrow Table 操作)
+            top_k = counts.sort_by([("counts", "descending")]).slice(0, 30)
+            top_keywords = [f"{row['values']} ({row['counts']})" for row in top_k.to_pylist()]
 
         return RetrievalContext(
             vector_results=vector_results,
             keyword_matches=top_keywords,
             knowledge_graph_summary=kg_sentences,
         )
+
+    async def _fetch_vector_context(self, all_tables: Iterable[str], date_filter: str) -> list[str]:
+        """Fetches detailed content from vector tables."""
+        vec_tables = [t for t in all_tables if t.startswith("vec_")]
+        results = []
+
+        def _fetch(t_name: str) -> list[str]:
+            tbl = self.db.open_table(t_name)
+            arrow_tbl = tbl.search().where(date_filter).select(["text"]).to_arrow()
+            if arrow_tbl.num_rows > 0:
+                source_label = t_name.replace("vec_", "").replace("_", " ").upper()
+                texts = arrow_tbl["text"].to_pylist()
+                return [f"[{source_label}] {t}" for t in texts]
+            return []
+
+        for t_name in vec_tables:
+            try:
+                partial = await asyncio.to_thread(_fetch, t_name)
+                results.extend(partial)
+            except Exception as e:
+                logger.debug("vector_fetch_skipped", table=t_name, error=str(e))
+        return results
+
+    async def _fetch_keyword_chunks(
+        self, all_tables: Iterable[str], date_filter: str
+    ) -> list[pa.Array]:
+        """Fetches keyword columns from keyword tables."""
+        kw_tables = [t for t in all_tables if t.startswith("kw_")]
+        chunks = []
+
+        def _fetch(t_name: str) -> pa.Array | None:
+            tbl = self.db.open_table(t_name)
+            arrow_tbl = tbl.search().where(date_filter).select(["keyword"]).to_arrow()
+            if arrow_tbl.num_rows > 0:
+                return arrow_tbl["keyword"]
+            return None
+
+        for t_name in kw_tables:
+            try:
+                res = await asyncio.to_thread(_fetch, t_name)
+                if res is not None:
+                    chunks.append(res)
+            except Exception as e:
+                logger.warning("ctx_fetch_kw_fail", table=t_name, error=str(e))
+        return chunks
+
+    async def _fetch_kg_sentences(self, all_tables: Iterable[str], date_filter: str) -> list[str]:
+        """Fetches and formats Knowledge Graph triples."""
+        kg_tables = [t for t in all_tables if t.startswith("kg_")]
+        sentences = []
+
+        def _fetch(t_name: str) -> list[str]:
+            tbl = self.db.open_table(t_name)
+            arrow_tbl = tbl.search().where(date_filter).to_arrow()
+            partial_res = []
+            if arrow_tbl.num_rows > 0:
+                rows = arrow_tbl.to_pylist()
+                for row in rows:
+                    line = (
+                        f"{row['date']} [{row['source']}]: "
+                        f"{row['subject']} --{row['predicate']}--> {row['object']}"
+                    )
+                    partial_res.append(line)
+            return partial_res
+
+        for t_name in kg_tables:
+            try:
+                res = await asyncio.to_thread(_fetch, t_name)
+                sentences.extend(res)
+            except Exception as e:
+                logger.warning("ctx_fetch_kg_fail", table=t_name, error=str(e))
+        return sentences

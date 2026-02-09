@@ -1,26 +1,31 @@
 """
 redate/domain_models.py
+
 Core business data structures and monadic error handling types.
-Focus: No-GIL safety (immutability), Result Pattern, Knowledge Graph Structures.
+
+Focus:
+- No-GIL safety (immutability).
+- Result Pattern.
+- Knowledge Graph Structures.
 """
 
 from __future__ import annotations
 
-import hashlib
 from datetime import date
+import hashlib
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 __all__ = [
-    "Result",
-    "Ok",
-    "Err",
     "AppError",
-    "NewsNotFoundError",
-    "NewsItem",
-    "KnowledgeTriple",
-    "KnowledgeExtractionResult",
     "DailyNewsBatch",
+    "Err",
+    "KnowledgeExtractionResult",
+    "KnowledgeTriple",
+    "NewsItem",
+    "NewsNotFoundError",
+    "Ok",
+    "Result",
     "RetrievalContext",
     "WeeklyReport",
 ]
@@ -28,22 +33,28 @@ __all__ = [
 
 # --- Result Pattern (Monad) for Expected Failures ---
 class Ok[T]:
+    """Result Monad: Success Case."""
+
     __match_args__ = ("value",)
 
     def __init__(self, value: T):
         self.value = value
 
     def is_ok(self) -> bool:
+        """Returns True for Ok."""
         return True
 
 
 class Err[E]:
+    """Result Monad: Failure Case."""
+
     __match_args__ = ("error",)
 
     def __init__(self, error: E):
         self.error = error
 
     def is_ok(self) -> bool:
+        """Returns False for Err."""
         return False
 
 
@@ -52,17 +63,20 @@ type Result[T, E] = Ok[T] | Err[E]
 
 # --- Domain Errors ---
 class AppError(BaseModel):
+    """Base class for application errors."""
+
     code: str
     message: str
 
 
 class NewsNotFoundError(AppError):
+    """Error raised when news cannot be found."""
+
     code: str = "NEWS_NOT_FOUND"
 
 
-# --- Knowledge Graph & Metadata Models ---
 class KnowledgeTriple(BaseModel):
-    """Represents a Subject-Predicate-Object relationship."""
+    """Represents a Subject-Predicate-Object relationship in the Knowledge Graph."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -72,7 +86,7 @@ class KnowledgeTriple(BaseModel):
 
 
 class KnowledgeExtractionResult(BaseModel):
-    """Container for AI-analyzed metadata."""
+    """Container for AI-analyzed metadata (Keywords and Triples)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -86,15 +100,11 @@ class RetrievalContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     vector_results: list[str] = Field(description="Semantically similar text chunks")
-    keyword_matches: list[str] = Field(
-        description="Content matched by high-frequency keywords"
-    )
-    knowledge_graph_summary: list[str] = Field(
-        description="Textualized graph relationships"
-    )
+    keyword_matches: list[str] = Field(description="Content matched by high-frequency keywords")
+    knowledge_graph_summary: list[str] = Field(description="Textualized graph relationships")
 
     def to_prompt_string(self) -> str:
-        """Formats the context for LLM ingestion."""
+        """Formats the aggregated context into a structured string for LLM ingestion."""
         parts = []
         if self.knowledge_graph_summary:
             parts.append(
@@ -102,14 +112,10 @@ class RetrievalContext(BaseModel):
                 + "\n".join(self.knowledge_graph_summary)
             )
         if self.keyword_matches:
-            parts.append(
-                "=== KEYWORD HIGHLIGHTS (Topics) ===\n"
-                + "\n".join(self.keyword_matches)
-            )
+            parts.append("=== KEYWORD HIGHLIGHTS (Topics) ===\n" + "\n".join(self.keyword_matches))
         if self.vector_results:
             parts.append(
-                "=== DETAILED CONTENT (Semantic Search) ===\n"
-                + "\n".join(self.vector_results)
+                "=== DETAILED CONTENT (Semantic Search) ===\n" + "\n".join(self.vector_results)
             )
         return "\n\n".join(parts)
 
@@ -129,13 +135,13 @@ class NewsItem(BaseModel):
 
     @property
     def fingerprint(self) -> str:
-        """Calculates deterministic hash for this item."""
-        payload = f"{self.content}|{self.url}".encode("utf-8")
+        """Calculates a deterministic SHA256 hash for this item based on content and URL."""
+        payload = f"{self.content}|{self.url}".encode()
         return hashlib.sha256(payload).hexdigest()
 
 
 class DailyNewsBatch(BaseModel):
-    """Collection of news for a specific day/category."""
+    """Collection of news items for a specific day and source category."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -152,7 +158,7 @@ class DailyNewsBatch(BaseModel):
 
 
 class WeeklyReport(BaseModel):
-    """Synthesized weekly or yearly summary."""
+    """Structured schema for synthesized weekly or yearly summaries."""
 
     model_config = ConfigDict(frozen=True)
 

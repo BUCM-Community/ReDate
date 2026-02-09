@@ -1,7 +1,11 @@
 """
-tests/test_utils_date.py
+tests/redate/test_utils_date.py
+
 Unit tests for Date Utilities.
-Focus: Timezone correctness and boundary logic.
+
+Focus:
+- Timezone correctness.
+- Boundary logic.
 """
 
 from datetime import date
@@ -22,6 +26,7 @@ def test_get_beijing_today_returns_date():
 def test_get_previous_week_range_logic():
     """
     Verify week calculation.
+
     If reference is Monday 2026-01-12, previous week is Jan 5 (Mon) - Jan 11 (Sun).
     """
     ref_date = date(2026, 1, 12)  # Monday

@@ -1,6 +1,11 @@
 """
-tests/test_adapter_image.py
+tests/redate/test_adapter_image.py
+
 Unit tests for Image Fetcher Fallback logic.
+
+Focus:
+- Provider rotation.
+- Download handling.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -37,5 +42,22 @@ async def test_fallback_strategy():
 
         assert result is not None
         assert result["source"] == "Pexels"
+
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_download_image_success():
+    """Test successful image download."""
+    adapter = HybridImageAdapter()
+
+    with patch.object(adapter.client, "get") as mock_get:
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"image_bytes"
+        mock_get.return_value.__aenter__.return_value = mock_resp
+
+        data = await adapter.download_image("http://test.com/img.jpg")
+        assert data == b"image_bytes"
 
     await adapter.close()

@@ -1,0 +1,106 @@
+# ops/compose/prod-sovereign.yml
+# ==============================================================================
+# ReDate Sovereign Deployment (VPS / Bare Metal)
+# Target Runtime: Podman (Rootless)
+# ==============================================================================
+name: redate-sovereign
+
+services:
+  # ==========================================
+  # Service: Application Core
+  # ==========================================
+  app:
+    image: ghcr.io/bucm-community/redate:latest
+    container_name: redate-core
+    restart: always
+    
+    # --- Security Hardening ---
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    
+    # --- Filesystem Strategy ---
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    volumes:
+      # Data Persistence (Named Volume - No Bind Mounts)
+      - type: volume
+        source: redate_data
+        target: /app/data
+    
+    # --- Networking ---
+    networks:
+      - redate-mesh
+    
+    # --- Configuration ---
+    env_file:
+      - ../config/.env.prod
+    environment:
+      - APP_ENV=prod
+      - STORAGE_PROVIDER=local
+      - STORAGE_ENDPOINT=http://seaweedfs:8333
+      - WECHAT_PROXY_URL=socks5://proxy-sidecar:1080
+
+    depends_on:
+      seaweedfs:
+        condition: service_started
+      proxy-sidecar:
+        condition: service_healthy
+
+  # ==========================================
+  # Service: Local Object Storage (S3)
+  # ==========================================
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.59
+    container_name: redate-storage
+    # Run S3 API on port 8333
+    command: "server -s3 -s3.port=8333 -dir=/data"
+    restart: always
+    user: "10001:10001"
+    volumes:
+      - type: volume
+        source: redate_blob_storage
+        target: /data
+    networks:
+      - redate-mesh
+    # No ports exposed to host (Internal Only)
+
+  # ==========================================
+  # Service: Egress Proxy (Sidecar)
+  # ==========================================
+  proxy-sidecar:
+    image: gogost/gost:3.2
+    container_name: redate-proxy
+    read_only: true
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ../config/gost-client.yaml
+        target: /etc/gost/config.yaml
+        read_only: true
+      - type: volume
+        source: redate_secrets
+        target: /certs
+        read_only: true
+    networks:
+      - redate-mesh
+    healthcheck:
+      test: ["CMD", "gost", "-V"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  redate-mesh:
+    driver: bridge
+    internal: false
+
+volumes:
+  redate_data: # LanceDB / State
+  redate_blob_storage:   # S3 Blobs
+  redate_secrets:        # Managed externally via secret injection

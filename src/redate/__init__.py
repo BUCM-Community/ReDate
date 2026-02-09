@@ -11,10 +11,10 @@ from .service_migration import MigrationService
 from .service_news import NewsService
 
 __all__ = [
-    "app",
-    "bootstrap",
-    "NewsService",
     "HybridStorageAdapter",
     "MigrationService",
+    "NewsService",
+    "app",
+    "bootstrap",
 ]
-__version__ = "0.2.0"
+__version__ = "0.3.0"

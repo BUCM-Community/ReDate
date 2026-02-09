@@ -1,5 +1,6 @@
 """
 redate/adapter_image.py
+
 Adapter for fetching images from free stock photo sites (Unsplash, Pexels, Pixabay).
 Implements a multi-source fallback strategy with keyword targeting.
 """
@@ -24,7 +25,23 @@ __all__ = ["HybridImageAdapter"]
 class HybridImageAdapter(ImageFetcher):
     """
     Production-grade adapter that rotates between Unsplash, Pexels, and Pixabay.
-    Includes keyword targeting and fallback logic.
+
+    Logic:
+    ```mermaid
+    graph TD
+        A[Fetch Request] --> B[Shuffle Strategies]
+        B --> C{Try Strategy 1}
+        C -->|Success| D[Return Image]
+        C -->|Fail| E{Try Strategy 2}
+        E -->|Success| D
+        E -->|Fail| F{Try Strategy 3}
+        F -->|Success| D
+        F -->|Fail| G[Return None]
+    ```
+
+    Attributes:
+        KEYWORDS: List of tech-focused keywords used for random search queries.
+
     """
 
     # Optimized search terms for Tech/AI news context
@@ -41,27 +58,24 @@ class HybridImageAdapter(ImageFetcher):
     ]
 
     def __init__(self) -> None:
-        self.unsplash_key = (
+        self.unsplash_key: str | None = (
             settings.UNSPLASH_ACCESS_KEY.get_secret_value()
             if settings.UNSPLASH_ACCESS_KEY
             else None
         )
-        self.pexels_key = (
-            settings.PEXELS_API_KEY.get_secret_value()
-            if settings.PEXELS_API_KEY
-            else None
+        self.pexels_key: str | None = (
+            settings.PEXELS_API_KEY.get_secret_value() if settings.PEXELS_API_KEY else None
         )
-        self.pixabay_key = (
-            settings.PIXABAY_API_KEY.get_secret_value()
-            if settings.PIXABAY_API_KEY
-            else None
+        self.pixabay_key: str | None = (
+            settings.PIXABAY_API_KEY.get_secret_value() if settings.PIXABAY_API_KEY else None
         )
 
         self.client = aiohttp.ClientSession(timeout=ClientTimeout(total=15.0))
+        self._background_tasks: set[asyncio.Task] = set()
 
     def _get_query(self) -> str:
         """Rotates a random keyword from the list for variety."""
-        return random.choice(self.KEYWORDS)
+        return random.choice(self.KEYWORDS)  # noqa: S311
 
     @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     async def _fetch_unsplash(self) -> dict[str, str] | None:
@@ -89,9 +103,7 @@ class HybridImageAdapter(ImageFetcher):
                         "credit": f"Photo by {data['user']['name']} on Unsplash",
                     }
                 elif resp.status == 403 or resp.status == 429:
-                    logger.warning(
-                        "unsplash_rate_limit_or_auth_fail", status=resp.status
-                    )
+                    logger.warning("unsplash_rate_limit_or_auth_fail", status=resp.status)
                 else:
                     logger.debug("unsplash_fetch_fail", status=resp.status)
         except Exception as e:
@@ -110,7 +122,7 @@ class HybridImageAdapter(ImageFetcher):
             "query": query,
             "orientation": "landscape",
             "per_page": 1,
-            "page": random.randint(1, 20),
+            "page": random.randint(1, 20),  # noqa: S311
         }
         headers = {"Authorization": self.pexels_key}
 
@@ -140,7 +152,7 @@ class HybridImageAdapter(ImageFetcher):
 
         query = self._get_query()
         url = "https://pixabay.com/api/"
-        params = {
+        params: dict[str, str | int] = {
             "key": self.pixabay_key,
             "q": query,
             "image_type": "photo",
@@ -155,7 +167,7 @@ class HybridImageAdapter(ImageFetcher):
                     data = await resp.json()
                     hits = data.get("hits", [])
                     if hits:
-                        hit = random.choice(hits)
+                        hit = random.choice(hits)  # noqa: S311
                         return {
                             "url": cast(str, hit["webformatURL"]),
                             "name": f"pixabay_{hit['id']}",
@@ -169,8 +181,16 @@ class HybridImageAdapter(ImageFetcher):
 
     async def fetch_random_tech_image(self) -> dict[str, str] | None:
         """
-        Fetches a random image using a randomized fallback strategy.
-        Returns: Dict with url, name, download_url, source.
+        Fetches a random image using a randomized provider fallback strategy.
+
+        Strategy:
+        1. Shuffles the list of providers (Unsplash, Pexels, Pixabay).
+        2. Attempts to fetch from each until successful.
+        3. Fires compliance events (e.g., Unsplash download tracking).
+
+        Returns:
+            Dict containing 'url', 'name', 'download_url', 'source', or None if all fail.
+
         """
         # Shuffle order to distribute load and variety
         strategies = [self._fetch_unsplash, self._fetch_pexels, self._fetch_pixabay]
@@ -181,32 +201,43 @@ class HybridImageAdapter(ImageFetcher):
             if result:
                 # Trigger download event for Unsplash compliance (Fire & Forget)
                 if result["source"] == "Unsplash" and "download_url" in result:
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         self._trigger_unsplash_download(result["download_url"])
                     )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
-                logger.info(
-                    "image_fetched", source=result["source"], name=result["name"]
-                )
+                logger.info("image_fetched", source=result["source"], name=result["name"])
                 return result
 
         logger.error("all_image_sources_exhausted")
         return None
 
     async def _trigger_unsplash_download(self, url: str) -> None:
-        """Hit the Unsplash download endpoint to increment stats (API Requirement)."""
+        """
+        Hits the Unsplash download endpoint to increment stats (API Requirement).
+
+        This is a 'fire and forget' operation.
+        """
         if not self.unsplash_key:
             return
         try:
-            async with self.client.get(
-                url, params={"client_id": self.unsplash_key}
-            ) as _:
+            async with self.client.get(url, params={"client_id": self.unsplash_key}) as _:
                 pass
-        except Exception:
-            pass  # Fail silently for stats
+        except Exception as e:
+            logger.debug("unsplash_download_trigger_fail", error=str(e))
 
     async def download_image(self, url: str) -> bytes | None:
-        """Stream download the image bytes."""
+        """
+        Streams download the image bytes from the given URL.
+
+        Args:
+            url: The direct image URL.
+
+        Returns:
+            Raw bytes of the image, or None if download fails.
+
+        """
         try:
             async with self.client.get(url) as resp:
                 if resp.status == 200:
@@ -217,12 +248,13 @@ class HybridImageAdapter(ImageFetcher):
         return None
 
     async def close(self) -> None:
+        """Closes the underlying HTTP client session."""
         await self.client.close()
 
-    async def __aenter__(self) -> "HybridImageAdapter":
+    async def __aenter__(self) -> HybridImageAdapter:
+        """Async context manager entry."""
         return self
 
-    async def __aexit__(
-        self, exc_type: object, exc_val: object, exc_tb: object
-    ) -> None:
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Async context manager exit, ensuring resources are closed."""
         await self.close()

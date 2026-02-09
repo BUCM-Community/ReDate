@@ -1,7 +1,11 @@
 """
-tests/test_main.py
+tests/redate/test_main.py
+
 Unit tests for CLI Entrypoint.
-Focus: Argument parsing and wiring.
+
+Focus:
+- Argument parsing.
+- Command wiring.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -30,3 +34,16 @@ def test_daily_command(mock_bootstrap):
     # call_args[0][1] should be 'ai-news'
     call_args = mock_service.run_daily_workflow.call_args
     assert call_args[0][1] == "ai-news"
+
+
+@patch("redate.main.bootstrap")
+def test_weekly_command(mock_bootstrap):
+    """Test 'weekly' command invokes run_weekly_workflow."""
+    mock_service = AsyncMock()
+    mock_bootstrap.return_value = mock_service
+
+    with patch("redate.main.asyncio.run", side_effect=lambda x: None):
+        result = runner.invoke(app, ["weekly"])
+
+    assert result.exit_code == 0
+    mock_service.run_weekly_workflow.assert_called_once()

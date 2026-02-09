@@ -1,0 +1,86 @@
+# ops/config/mypy.toml
+
+# =========================================================
+# MyPy Static Type Checking Configuration
+# Target: Python 3.12+ (Strict Mode)
+# =========================================================
+
+[tool.mypy]
+# 1. 基础环境
+python_version = "3.12"
+pretty = true  # 输出带颜色的错误报告，更易读
+show_column_numbers = true
+show_error_codes = true
+
+# 2. 插件集成 (Critical for Pydantic V2)
+plugins = ["pydantic.mypy"]
+
+# 3. 严格模式 (The "Nuclear Option")
+strict = true
+# 展开 strict 包含的具体项 (为了显式控制，虽然 strict=true 已隐含)
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+
+# 4. 安全性增强 (防止逻辑错误)
+strict_equality = true  # 防止 1 == "1"
+warn_unreachable = true # 防止死代码
+
+# 5. 代码卫生 (防止废代码)
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+
+# 6. 处理 Any (The Tricky Part)
+# 全局不允许隐式返回 Any，但在下方 Overrides 中对特定库放宽
+warn_return_any = true 
+# 全局报错找不到的 Import (防拼写错误)，但在 Overrides 中对特定库放宽
+ignore_missing_imports = false 
+
+# =========================================================
+# Pydantic 插件特定配置
+# =========================================================
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# =========================================================
+# 第三方库白名单 (The "DMZ")
+# =========================================================
+
+# 针对所有无类型提示的库的统一配置
+[[tool.mypy.overrides]]
+module = [
+    "aioboto3.*",
+    "lancedb.*",
+    "pyarrow.*",
+    "google.genai.*",
+    "google.genai.types.*",
+    "bs4.*",
+    "structlog.*",
+    "tenacity.*",
+    "moto.*",
+    "boto3.*",
+    "botocore.*"
+]
+# 允许这些库返回 Any，并且不报错
+warn_return_any = false
+# 忽略这些库的内部类型错误
+ignore_errors = true
+# 忽略找不到这些库的 stubs 错误
+ignore_missing_imports = true
+# 允许对这些库进行无类型调用
+disallow_untyped_calls = false
+
+# =========================================================
+# 测试目录配置 (适当放宽)
+# =========================================================
+[[tool.mypy.overrides]]
+module = "tests.*"
+# 测试代码中经常使用 MagicMock (它是 Any)，所以不警告返回 Any
+warn_return_any = false
+# 允许定义无类型的辅助函数 (def setup(): ...)
+disallow_untyped_defs = false

@@ -1,14 +1,18 @@
 """
 scripts/sync_meta.py
+
 Syncs metadata from pixi.toml to pyproject.toml using tomlkit.
+
 This script ensures that the Single Source of Truth (SSOT) remains pixi.toml.
 It handles the conversion between Pixi's string-based authors and PEP 621 structured authors.
 """
 
+from pathlib import Path
 import re
 import sys
-from pathlib import Path
 from typing import Any, NoReturn
+
+from redate.utils_telemetry import logger
 
 # Ensure tomlkit is installed (provided by feature.dev)
 try:
@@ -16,32 +20,33 @@ try:
     from tomlkit import TOMLDocument
     from tomlkit.items import Table
 except ImportError:
-    print("Critical Error: 'tomlkit' is missing. Run 'pixi install' first.")
+    logger.error("Critical Error: 'tomlkit' is missing. Run 'pixi install' first.")
     sys.exit(1)
 
 
-def fail(message: str) -> NoReturn:
-    print(f"[!] {message}", file=sys.stderr)
+def _fail(message: str) -> NoReturn:
+    logger.error(f"[!] {message}", file=sys.stderr)
     sys.exit(1)
 
 
-def load_toml(path: Path) -> TOMLDocument:
+def _load_toml(path: Path) -> TOMLDocument:
     if not path.exists():
         if path.name == "pyproject.toml":
-            print(f"[*] Creating new: {path}")
+            logger.info(f"[*] Creating new: {path}")
             return tomlkit.document()
-        fail(f"File not found: {path}")
+        _fail(f"File not found: {path}")
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with Path.open(path, encoding="utf-8") as f:
             return tomlkit.load(f)
     except Exception as e:
-        fail(f"Failed to parse {path}: {e}")
+        _fail(f"_Failed to parse {path}: {e}")
 
 
 def parse_author(author_str: str) -> dict[str, str]:
     """
     Parses 'Name <email>' into {'name': 'Name', 'email': 'email'}.
+
     Fallback to {'name': author_str} if format doesn't match.
     """
     if not isinstance(author_str, str):
@@ -52,18 +57,19 @@ def parse_author(author_str: str) -> dict[str, str]:
     return {"name": author_str.strip()}
 
 
-def sync_metadata() -> None:
+def sync_metadata() -> None:  # noqa: C901
+    """Sync pyproject.toml metadata using tomlkit."""
     root_dir = Path(__file__).resolve().parent.parent
     pixi_path = root_dir / "pixi.toml"
     pyproject_path = root_dir / "pyproject.toml"
 
-    print(f"[*] Reading source: {pixi_path}")
-    pixi_doc = load_toml(pixi_path)
+    logger.info(f"[*] Reading source: {pixi_path}")
+    pixi_doc = _load_toml(pixi_path)
 
     # 1. Extract Workspace Metadata
     workspace = pixi_doc.get("workspace") or pixi_doc.get("project")
     if not isinstance(workspace, (dict, Table)):
-        fail("Invalid pixi.toml: Missing [workspace] or [project] table.")
+        _fail("Invalid pixi.toml: Missing [workspace] or [project] table.")
 
     target_version = workspace.get("version")
     target_desc = workspace.get("description")
@@ -76,22 +82,22 @@ def sync_metadata() -> None:
     target_requires_python = ">=3.11"
 
     if not target_version:
-        fail("Invalid pixi.toml: Missing 'version'.")
+        _fail("Invalid pixi.toml: Missing 'version'.")
 
     # 2. Load or Init pyproject.toml
-    print(f"[*] Loading target: {pyproject_path}")
-    pyproject_doc = load_toml(pyproject_path)
+    logger.info(f"[*] Loading target: {pyproject_path}")
+    pyproject_doc = _load_toml(pyproject_path)
 
     # 3. Ensure Basic Structure ([build-system] & [project])
     if "build-system" not in pyproject_doc:
-        print("[*] Init [build-system]")
+        logger.info("[*] Init [build-system]")
         build_system = tomlkit.table()
         build_system["requires"] = ["hatchling"]
         build_system["build-backend"] = "hatchling.build"
         pyproject_doc.add("build-system", build_system)
 
     if "project" not in pyproject_doc:
-        print("[*] Init [project]")
+        logger.info("[*] Init [project]")
         pyproject_doc.add("project", tomlkit.table())
 
     project_table: Table = pyproject_doc["project"]  # type: ignore
@@ -126,18 +132,18 @@ def sync_metadata() -> None:
 
     # 6. Finalize
     if changes:
-        print("[*] Applying changes:")
+        logger.info("[*] Applying changes:")
         for change in changes:
-            print(f"    - {change}")
+            logger.info(f"    - {change}")
 
         try:
-            with open(pyproject_path, "w", encoding="utf-8") as f:
+            with Path.open(pyproject_path, "w", encoding="utf-8") as f:
                 tomlkit.dump(pyproject_doc, f)
-            print(f"[+] {pyproject_path.name} successfully synced.")
+            logger.info(f"[+] {pyproject_path.name} successfully synced.")
         except Exception as e:
-            fail(f"Failed to write pyproject.toml: {e}")
+            _fail(f"_Failed to write pyproject.toml: {e}")
     else:
-        print(f"[✓] {pyproject_path.name} is already up to date.")
+        logger.info(f"[✓] {pyproject_path.name} is already up to date.")
 
 
 if __name__ == "__main__":

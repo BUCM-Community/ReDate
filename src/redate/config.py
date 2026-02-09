@@ -1,21 +1,30 @@
 """
 redate/config.py
+
 Application configuration using Pydantic Settings.
+
 Focus: Immutable configuration, Secret management, and Type safety.
 Includes specific configs for OpenRouter, SiliconFlow, and Gemini Grounding.
 """
 
 from __future__ import annotations
 
+import tempfile
 from typing import Literal
 
 from pydantic import HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__ = ["settings", "Settings"]
+__all__ = ["Settings", "settings"]
 
 
 class Settings(BaseSettings):
+    """
+    Global Application Configuration.
+
+    Loads from environment variables and `.env` files.
+    """
+
     # --- Infrastructure ---
     ENV: Literal["development", "production"] = "development"
 
@@ -44,7 +53,9 @@ class Settings(BaseSettings):
     # Path for local vector storage (when using "local" mode)
     LANCEDB_LOCAL_PATH: str = "./data/lancedb_store"
     # Local cache directory for Remote S3 LanceDB (to reduce latency)
-    LANCEDB_REMOTE_CACHE_DIR: str = "/tmp/lancedb_cache"
+    # Using secure temp dir logic via tempfile in post_init or dynamic property is harder in pydantic settings
+    # So we default to a safe value or rely on environment overrides.
+    LANCEDB_REMOTE_CACHE_DIR: str = f"{tempfile.gettempdir()}/lancedb_cache"
 
     # --- LLM Selection ---
     LLM_PROVIDER: Literal["gemini", "openai"] = "gemini"
@@ -95,4 +106,4 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()  # type: ignore[call-arg]
+settings = Settings()

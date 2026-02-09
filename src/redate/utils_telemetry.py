@@ -1,19 +1,32 @@
 """
 redate/utils_telemetry.py
-Configures structured JSON logging suitable for R2 storage and CloudWatch.
+
+Configures structured JSON logging suitable for storage and CloudWatch.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
-import sys
 from pathlib import Path
+import sys
+from typing import TYPE_CHECKING
 
 import structlog
+from structlog.processors import (
+    ExceptionRenderer,
+    JSONRenderer,
+    StackInfoRenderer,
+    TimeStamper,
+    UnicodeDecoder,
+)
 
 from .utils_date import get_beijing_today
 
-__all__ = ["logger", "configure_logging"]
+if TYPE_CHECKING:
+    from structlog.typing import EventDict, WrappedLogger
+
+__all__ = ["configure_logging", "logger"]
 
 
 def setup_logging_paths() -> Path:
@@ -27,10 +40,22 @@ def setup_logging_paths() -> Path:
 
 
 def configure_logging() -> None:
+    """
+    Configure logging and structlog.
+
+    include: log level, timestamp, output handler and so on.
+    """
     log_file = setup_logging_paths()
 
     # Define processors
-    processors = [
+    processors: list[
+        Callable[[WrappedLogger, str, EventDict], EventDict]
+        | TimeStamper
+        | StackInfoRenderer
+        | ExceptionRenderer
+        | UnicodeDecoder
+        | JSONRenderer
+    ] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),

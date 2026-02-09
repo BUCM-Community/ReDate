@@ -1,7 +1,12 @@
 """
-tests/test_adapter_gemini.py
+tests/redate/test_adapter_gemini.py
+
 Unit tests for Gemini LLM Adapter.
-Focus: Retry logic, Client Rotation, API integration mocking.
+
+Focus:
+- Retry logic.
+- Client Rotation.
+- API integration mocking.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -41,8 +46,7 @@ async def test_generate_embedding_success(mock_genai, mock_sleep):
     mock_genai.aio.models.embed_content.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_client_rotation(mock_genai):
+def test_client_rotation(mock_genai):
     """Test that multiple clients are initialized and rotated."""
     # Since we set GEMINI_API_KEY_ALT in conftest, rotation should happen
     adapter = GeminiAdapter()
@@ -59,3 +63,17 @@ async def test_client_rotation(mock_genai):
     assert len(adapter.clients) == 2
     assert client1 != client2
     assert client1 == client3  # Rotation loop
+
+
+@pytest.mark.asyncio
+async def test_summarize_daily_success(mock_genai):
+    """Test daily summary generation success."""
+    mock_response = MagicMock()
+    mock_response.text = "<ul><li>Summary</li></ul>"
+    mock_genai.aio.models.generate_content.return_value = mock_response
+
+    adapter = GeminiAdapter()
+    summary = await adapter.summarize_daily("News content")
+
+    assert "Summary" in summary
+    mock_genai.aio.models.generate_content.assert_called_once()

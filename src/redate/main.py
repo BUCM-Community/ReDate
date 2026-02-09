@@ -1,7 +1,12 @@
 """
 redate/main.py
+
 CLI Entry point wiring dependencies.
-Focus: Composition Root, Type-safe CLI, Dynamic Dependency Injection.
+
+Focus:
+- Composition Root.
+- Type-safe CLI via Typer.
+- Dynamic Dependency Injection.
 """
 
 import asyncio
@@ -48,7 +53,6 @@ def _create_llm_engine(provider_override: str | None = None) -> LLMEngine:
 
 def bootstrap() -> NewsService:
     """Dependency Injection Wiring with dynamic overrides."""
-
     # Resolve overrides
     deploy_mode = state.get("mode")  # remote or local
     llm_provider = state.get("llm")
@@ -70,9 +74,7 @@ def bootstrap() -> NewsService:
 
 @app.callback()
 def main(
-    mode: Annotated[
-        str, typer.Option(help="Deploy Mode: 'remote' (R2) or 'local' (Seaweed)")
-    ] = "",
+    mode: Annotated[str, typer.Option(help="Deploy Mode: 'remote' (R2) or 'local' (Seaweed)")] = "",
     llm: Annotated[str, typer.Option(help="LLM Provider: 'gemini' or 'openai'")] = "",
 ):
     if mode:
@@ -86,7 +88,11 @@ def daily(
     target_date: Annotated[str | None, typer.Option(help="YYYY-MM-DD")] = None,
     category: str = "60s",
 ) -> None:
-    """Run daily ingestion (Fetch -> Store)."""
+    """
+    Run the daily ingestion workflow (Fetch -> Store -> Analyze).
+
+    If target_date is not provided, defaults to today (Beijing Time).
+    """
     service = bootstrap()
     d = date.fromisoformat(target_date) if target_date else get_beijing_today()
 
@@ -128,14 +134,15 @@ def migrate(
 ) -> None:
     """
     Migrate data between Cloud (R2) and Local (SeaweedFS).
-    Requires all credentials to be set in .env.
+
+    Requires strict environment variable configuration for both endpoints.
     """
     from .service_migration import MigrationService
 
     logger.info("starting_migration_utility", direction=direction)
 
     # Map CLI arg to internal literal
-    mode_map = {"in": "cloud_to_local", "out": "local_to_cloud"}
+    mode_map: dict[str, str] = {"in": "cloud_to_local", "out": "local_to_cloud"}
 
     if direction not in mode_map:
         logger.error("invalid_direction", allowed=["in", "out"])
@@ -155,7 +162,7 @@ def migrate(
         raise typer.Exit(code=1) from e
 
 
-def cli():
+def cli() -> None:
     try:
         app()
     except Exception as e:

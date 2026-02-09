@@ -1,6 +1,8 @@
 """
 redate/adapter_gemini.py
+
 Google GenAI SDK implementation.
+
 Focus:
 - gemini-2.5-flash-preview-09-2025
 - Grounding (Google Search)
@@ -33,18 +35,31 @@ from .utils_telemetry import logger
 if TYPE_CHECKING:
     from datetime import date
 
+    from google.genai.client import AsyncClient
+
 __all__ = ["GeminiAdapter"]
 
 
 class GeminiAdapter(LLMEngine):
-    def __init__(self):
+    """
+    Adapter for Google's Gemini models via the GenAI SDK.
+
+    Handles strict rate limiting (RPM) and supports structured outputs via Pydantic.
+    """
+
+    def __init__(self) -> None:
+        """
+        Initialize Gemini Adapter with API Keys and Rate Limiters.
+
+        Raises:
+            ValueError: If GEMINI_API_KEY is missing.
+
+        """
         # Ensure API keys are present before init
         if not settings.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is required for GeminiAdapter")
 
-        self.clients = [
-            genai.Client(api_key=settings.GEMINI_API_KEY.get_secret_value()).aio
-        ]
+        self.clients = [genai.Client(api_key=settings.GEMINI_API_KEY.get_secret_value()).aio]
         if settings.GEMINI_API_KEY_ALT:
             self.clients.append(
                 genai.Client(api_key=settings.GEMINI_API_KEY_ALT.get_secret_value()).aio
@@ -59,13 +74,17 @@ class GeminiAdapter(LLMEngine):
         # Embedding RPM 100 = 1 request every 0.6 seconds.
         self._embed_lock = asyncio.Lock()
 
-    def _get_client(self):
+    def _get_client(self) -> AsyncClient:
         client = self.clients[self._current_index]
         self._current_index = (self._current_index + 1) % len(self.clients)
         return client
 
     async def _enforce_chat_rate_limit(self):
-        """Strictly enforces 5 RPM (12s interval) for Gemini 2.5 Flash Preview."""
+        """
+        Strictly enforces 5 RPM (12s interval) for Gemini 2.5 Flash Preview.
+
+        Uses a global lock to prevent race conditions in concurrent executions.
+        """
         async with self._chat_lock:
             now = asyncio.get_running_loop().time()
             elapsed = now - self._chat_last_call
@@ -82,9 +101,27 @@ class GeminiAdapter(LLMEngine):
     )
     async def generate_embedding(self, text: str) -> list[float]:
         """
-        Uses gemini-embedding-001.
-        Merges requests logic isn't strictly needed for single-item calls,
-        but we enforce the RPM 100 limit here.
+        Generates text embeddings using `gemini-embedding-001`.
+
+        Enforces a simplified rate limit (approx 0.6s delay) to comply with RPM 100.
+
+        Logic:
+        ```mermaid
+        graph TD
+            A[Start] --> B{Rate Limit?}
+            B -->|Yes| C[Sleep 0.6s]
+            B -->|No| D[Call API]
+            D --> E{Success?}
+            E -->|Yes| F[Return Vector]
+            E -->|No| G[Retry/Error]
+        ```
+
+        Args:
+            text: The input text string to embed.
+
+        Returns:
+            A list of floats representing the embedding vector.
+
         """
         try:
             # Enforce simplified rate limit (approx 0.6s delay)
@@ -110,10 +147,22 @@ class GeminiAdapter(LLMEngine):
         before_sleep=before_sleep_log(logger, 2),
     )
     async def summarize_daily(self, text: str) -> str:
+        """
+        Summarizes raw news text into a Daily Briefing format using Gemini Chat.
+
+        Enables Google Search tools for fact verification.
+
+        Args:
+            text: The raw news content concatenated string.
+
+        Returns:
+            HTML formatted string containing the summary.
+
+        """
         await self._enforce_chat_rate_limit()
 
         # Configure Grounding (Google Search)
-        tools = []
+        tools: list[types.Tool] | None = None
         if settings.GEMINI_SEARCH_ENABLED:
             tools = [types.Tool(google_search=types.GoogleSearch())]
 
@@ -145,6 +194,18 @@ class GeminiAdapter(LLMEngine):
         before_sleep=before_sleep_log(logger, 2),
     )
     async def extract_knowledge(self, text: str) -> KnowledgeExtractionResult:
+        """
+        Extracts structured knowledge (Keywords and Knowledge Graph) from text.
+
+        Uses Gemini's structured output capability to return a Pydantic model directly.
+
+        Args:
+            text: The input news text.
+
+        Returns:
+            KnowledgeExtractionResult: Object containing keywords and KG triples.
+
+        """
         await self._enforce_chat_rate_limit()
 
         prompt = (
@@ -189,6 +250,22 @@ class GeminiAdapter(LLMEngine):
         end_date: date,
         period_type: str = "Weekly",
     ) -> WeeklyReport:
+        """
+        Generates a comprehensive periodic report (Weekly/Yearly).
+
+        Utilizes the 'Three Ways' methodology (KG, Keywords, Vector Context)
+        and Google Search grounding to synthesize the report.
+
+        Args:
+            context: Aggregated retrieval context (RAG).
+            start_date: Report start date.
+            end_date: Report end date.
+            period_type: "Weekly" or "Yearly".
+
+        Returns:
+            WeeklyReport: Structured report object suitable for JSON serialization.
+
+        """
         await self._enforce_chat_rate_limit()
 
         context_str = context.to_prompt_string()
@@ -196,7 +273,7 @@ class GeminiAdapter(LLMEngine):
         safe_context = context_str[:max_chars]
 
         # Enable Grounding for reports to ensure accuracy of dates/facts
-        tools = []
+        tools: list[types.Tool] | None = None
         if settings.GEMINI_SEARCH_ENABLED:
             tools = [types.Tool(google_search=types.GoogleSearch())]
 
@@ -227,9 +304,7 @@ class GeminiAdapter(LLMEngine):
 
             if response.parsed:
                 report = cast(WeeklyReport, response.parsed)
-                return report.model_copy(
-                    update={"start_date": start_date, "end_date": end_date}
-                )
+                return report.model_copy(update={"start_date": start_date, "end_date": end_date})
 
             resp_text = response.text or "{}"
             # Fallback manual parsing
@@ -238,14 +313,12 @@ class GeminiAdapter(LLMEngine):
                 return WeeklyReport(
                     start_date=start_date,
                     end_date=end_date,
-                    summary_text=data.get(
-                        "summary_text", f"No {period_type} summary generated."
-                    ),
+                    summary_text=data.get("summary_text", f"No {period_type} summary generated."),
                     key_events=data.get("key_events", []),
                     best_cover_image=None,
                 )
-            except json.JSONDecodeError:
-                raise ValueError("Failed to parse JSON from LLM response")
+            except json.JSONDecodeError as err:
+                raise ValueError("Failed to parse JSON from LLM response") from err
 
         except Exception as e:
             logger.error("gemini_report_fail", period=period_type, error=str(e))

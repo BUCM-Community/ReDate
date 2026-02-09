@@ -1,3 +1,13 @@
+"""
+tests/redate/test_adapter_wechat.py
+
+Unit tests for WeChat Adapter.
+
+Focus:
+- Token caching strategies.
+- API interactions.
+"""
+
 import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,6 +19,7 @@ from redate.adapter_wechat import WeChatAdapter
 
 @pytest.fixture
 def mock_token_cache(tmp_path):
+    """Fixture to provide a temporary token cache file."""
     cache_file = tmp_path / "wx_token.json"
     with patch("src.adapter_wechat.Path", return_value=cache_file):
         yield cache_file
@@ -16,6 +27,7 @@ def mock_token_cache(tmp_path):
 
 @pytest.mark.asyncio
 async def test_wechat_get_token_cached(mock_token_cache):
+    """Test retrieval of token from valid cache."""
     # Setup cache
     mock_token_cache.parent.mkdir(parents=True, exist_ok=True)
     mock_token_cache.write_text(
@@ -30,13 +42,12 @@ async def test_wechat_get_token_cached(mock_token_cache):
 
 @pytest.mark.asyncio
 async def test_wechat_get_token_refresh():
+    """Test token refresh when cache is missing or expired."""
     adapter = WeChatAdapter()
 
     mock_resp = MagicMock()
     mock_resp.status = 200
-    mock_resp.json = AsyncMock(
-        return_value={"access_token": "new_token", "expires_in": 7200}
-    )
+    mock_resp.json = AsyncMock(return_value={"access_token": "new_token", "expires_in": 7200})
 
     with patch.object(adapter.aclient, "post") as mock_post:
         mock_post.return_value.__aenter__.return_value = mock_resp
@@ -51,6 +62,7 @@ async def test_wechat_get_token_refresh():
 
 @pytest.mark.asyncio
 async def test_wechat_publish_article():
+    """Test article publication flow."""
     adapter = WeChatAdapter()
     adapter._get_token = AsyncMock(return_value="token123")
 
@@ -63,5 +75,23 @@ async def test_wechat_publish_article():
 
         media_id = await adapter.publish_article("Title", "Content", None)
         assert media_id == "draft123"
+
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_upload_permanent_material():
+    """Test uploading permanent images."""
+    adapter = WeChatAdapter()
+    adapter._get_token = AsyncMock(return_value="token123")
+
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value={"media_id": "perm123"})
+
+    with patch.object(adapter.aclient, "post") as mock_post:
+        mock_post.return_value.__aenter__.return_value = mock_resp
+        media_id = await adapter.upload_permanent_material(b"data", "test.jpg")
+        assert media_id == "perm123"
 
     await adapter.close()

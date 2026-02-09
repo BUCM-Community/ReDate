@@ -1,6 +1,8 @@
 """
 redate/service_migration.py
+
 Data Migration Service (R2 <-> Local/SeaweedFS).
+
 Focus:
 - Bidirectional Migration.
 - Streaming S3 copy.
@@ -29,10 +31,13 @@ __all__ = ["MigrationService"]
 class MigrationService:
     """
     Handles bidirectional data migration between Cloud (R2) and Local (SeaweedFS).
-    Uses streaming for objects and Arrow Flight/IPC for vector data.
+
+    Uses streaming for raw objects and Arrow Flight/IPC for vector data
+    to ensure low memory footprint.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize both adapters based on environment config."""
         # Instantiate explicit adapters for Source and Destination
         # We assume secrets for BOTH are present in .env
         try:
@@ -49,7 +54,18 @@ class MigrationService:
         self, direction: Literal["cloud_to_local", "local_to_cloud"]
     ) -> Result[str, str]:
         """
-        Orchestrates bidirectional migration.
+        Orchestrates the bidirectional migration process.
+
+        Executes in two phases:
+        1. Object Storage Migration (JSON/Images).
+        2. LanceDB Vector Data Migration.
+
+        Args:
+            direction: The migration direction.
+
+        Returns:
+            Result: Ok(message) or Err(error_message).
+
         """
         try:
             logger.info("migration_start", direction=direction)
@@ -78,9 +94,7 @@ class MigrationService:
     async def _migrate_objects(
         self, src_adapter: HybridStorageAdapter, dst_adapter: HybridStorageAdapter
     ) -> None:
-        """
-        Migrates S3 objects using streams to avoid memory pressure.
-        """
+        """Migrates S3 objects using streams to avoid memory pressure."""
         session = aioboto3.Session()
 
         # Extract credentials from adapters to ensure consistency
@@ -139,16 +153,22 @@ class MigrationService:
                     await asyncio.gather(*chunk)
 
     async def _copy_single_object(
-        self, src_client, dst_client, src_bucket, dst_bucket, key
-    ):
+        self,
+        src_client: S3Client,
+        dst_client: S3Client,
+        src_bucket: str,
+        dst_bucket: str,
+        key: str,
+    ) -> None:
         """Streams a single object from Source to Dest."""
         # Idempotency: Check existence in dest
         try:
             await dst_client.head_object(Bucket=dst_bucket, Key=key)
             logger.debug("object_exists_skip", key=key)
             return
-        except Exception:
-            pass
+        except Exception as e:
+            # Log why check failed (usually 404, expected)
+            logger.debug("object_not_found_on_dest", key=key, error=str(e))
 
         # Stream Copy
         logger.info("migrating_object", key=key, from_bucket=src_bucket)
@@ -173,6 +193,7 @@ class MigrationService:
     ) -> None:
         """
         Migrates LanceDB tables using PyArrow for type-safe, efficient transfer.
+
         For huge datasets, we would use LanceDB's `copy` or file-level sync.
         """
         src_db = src_adapter.db
